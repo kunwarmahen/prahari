@@ -344,7 +344,12 @@ looks are kept for `prahari looks` and the page, and nothing is sent.
 A then-turn runs here (`--runner direct`, the default: Yantra as a
 program, its questions put to you in your chat when a Dvara is set) or
 through Dvara as a person (`--runner dvara --as NAME`: their allowance,
-their rules, `came_by: prahari` on Dvara's page).
+their rules, `came_by: prahari` on Dvara's page). On the Dvara road a
+watch's agent is a name on Dvara's roster, which a look can't open, so
+the look is made with plain Yantra and this computer's accounts, and
+Dvara runs the named agent when it fires. That is why Dvara offers
+watches to one person, named (`--prahari-for`, Dvara's notes/55): a
+look reads this computer's accounts, which are that person's.
 
 ## Settings
 
@@ -406,7 +411,7 @@ src/prahari/
 ## Status
 
 The watch, its rules, the inlet, the page and the agent's tools work,
-and are covered by 106 tests. The API is not stable.
+and are covered by 107 tests. The API is not stable.
 
 Not here yet:
 

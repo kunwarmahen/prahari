@@ -70,6 +70,11 @@ class TestTheLook:
         assert seen[seen.index("--agent") + 1] == "/a"
         assert seen[seen.index("--cwd") + 1].endswith("work/w1")
 
+    def test_on_the_dvara_road_the_agents_name_is_not_a_package(self, tmp_path):
+        command = fake_yantra(tmp_path, {"format": "yantra.call.v1", "ok": True})
+        Caller(tmp_path, command=command).call(watch(agent="minder", runner="dvara"))
+        assert "--agent" not in argv_seen(tmp_path)
+
     def test_a_preview_is_granted_nothing(self, tmp_path):
         command = fake_yantra(tmp_path, {"format": "yantra.call.v1", "ok": True})
         Caller(tmp_path, command=command).call(watch(), granted=False)

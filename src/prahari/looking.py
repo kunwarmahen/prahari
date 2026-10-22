@@ -110,6 +110,15 @@ def yantra_home() -> Path | None:
     return Path(raw).expanduser() if raw else None
 
 
+def look_agent(watch: Watch) -> str:
+    """The package a look is made with. On the direct road a watch's agent
+    is a package folder, and the look uses it (a package's own tools are
+    there). On the Dvara road it is a NAME on Dvara's roster, which this
+    Yantra cannot open: the look is made with plain Yantra and this
+    computer's accounts, and Dvara runs the named agent when it fires."""
+    return watch.agent if watch.runner == "direct" else ""
+
+
 def grant_for(tool: str, args: dict) -> str | None:
     """The grant that covers exactly this call (Yantra's Grant form,
     every argument fixed), or None when a value cannot be written as one."""
@@ -161,7 +170,7 @@ class Caller:
         (a preview, before anybody said yes): only a tool that reads."""
         where = self.work / (watch.id or "preview")
         try:
-            argv = self.argv(watch.check, watch.agent, granted, where)
+            argv = self.argv(watch.check, look_agent(watch), granted, where)
         except RunnerMissing as exc:
             return Called(ok=False, detail=str(exc))
         where.mkdir(parents=True, exist_ok=True)

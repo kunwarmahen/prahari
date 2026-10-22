@@ -192,7 +192,8 @@ class Tools:
                                listen=str(args.get("listen") or ""),
                                pick=args.get("pick"), when=args.get("when"),
                                every=str(args.get("every") or ""),
-                               sample=args.get("sample"), agent=self.agent)
+                               sample=args.get("sample"),
+                               agent=self.agent if self.runner == "direct" else "")
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         if said.get("items"):
             lines += ["Items it sees now (first few):", *[f"  {i}" for i in said["items"]]]
