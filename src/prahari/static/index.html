@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prahari</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+/* Prahari's page. One accent (deep teal, the watch: what fired, the one
+   main button) on Samay's cool paper; everything else is ink and lines.
+   No fonts are fetched. Light and dark are the same tokens swapped. */
+:root {
+  color-scheme: light;
+  --paper: #f3f5f2; --sheet: #fbfcfa; --sunk: #e8ece6; --line: #d6dcd3;
+  --ink: #1b211e; --ink-2: #4d5852; --ink-3: #6f7a73;
+  --teal: #2f6f8f; --teal-ink: #ffffff; --teal-soft: rgba(47, 111, 143, .12);
+  --ok: #2c7a52; --needs: #8b3a6f; --bad: #b3261e; --quiet: #7b867f;
+  --focus: rgba(47, 111, 143, .45);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --deva: "Noto Sans Devanagari", "Noto Serif Devanagari", "Mangal",
+          "Kohinoor Devanagari", system-ui, sans-serif;
+  --measure: 880px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #111513; --sheet: #171c19; --sunk: #1f2622; --line: #2c3530;
+    --ink: #e6ebe7; --ink-2: #aab5ae; --ink-3: #85918a;
+    --teal: #5fa8c9; --teal-ink: #0b1418; --teal-soft: rgba(95, 168, 201, .15);
+    --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8a958e;
+    --focus: rgba(95, 168, 201, .5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #111513; --sheet: #171c19; --sunk: #1f2622; --line: #2c3530;
+  --ink: #e6ebe7; --ink-2: #aab5ae; --ink-3: #85918a;
+  --teal: #5fa8c9; --teal-ink: #0b1418; --teal-soft: rgba(95, 168, 201, .15);
+  --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8a958e;
+  --focus: rgba(95, 168, 201, .5);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); }
+.wrap { max-width: var(--measure); margin: 0 auto; padding: 28px 16px 64px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 13px; }
+.hidden { display: none !important; }
+
+header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 26px; }
+.mark { font-family: var(--deva); font-size: 52px; line-height: .9; font-weight: 600; }
+.mark small { display: block; font: 14px/1.4 var(--sans); color: var(--ink-3); margin-top: 10px; }
+.state-line { margin-left: auto; text-align: right; color: var(--ink-2); font-size: 14px;
+              max-width: 56ch; }
+.state-line b { color: var(--ink); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+       vertical-align: 1px; background: var(--quiet); }
+.dot.on { background: var(--ok); }
+
+.bar { display: flex; align-items: center; gap: 12px; margin: 30px 0 10px; }
+.bar h2 { font-size: 20px; margin: 0; font-weight: 650; }
+.bar .grow { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--sheet); border-radius: 8px;
+       padding: 6px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--ink-3); }
+.btn.main { background: var(--teal); border-color: var(--teal); color: var(--teal-ink);
+            font-weight: 600; }
+.btn.link { border: 0; background: none; padding: 4px 6px; color: var(--ink-2); }
+.btn.link:hover { color: var(--ink); text-decoration: underline; }
+.btn.link.danger:hover { color: var(--bad); }
+.btn[disabled] { opacity: .5; cursor: default; }
+.note { background: var(--teal-soft); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+.note.bad { background: rgba(179, 38, 30, .1); }
+
+.watch { border-top: 1px solid var(--line); padding: 14px 0; }
+.watch:last-child { border-bottom: 1px solid var(--line); }
+.watch .top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.watch .name { font-weight: 650; font-size: 16px; }
+.watch .tag { font-size: 12px; color: var(--ink-3); border: 1px solid var(--line);
+              border-radius: 999px; padding: 0 8px; }
+.watch .tag.paused { color: var(--needs); border-color: var(--needs); }
+.watch .tag.listen { color: var(--teal); border-color: var(--teal); }
+.watch .says { color: var(--ink-2); margin: 2px 0; }
+.watch .last { font-size: 14px; color: var(--ink-3); }
+.watch .paused-why { font-size: 14px; color: var(--needs); }
+.watch .acts { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 2px; margin-left: -6px; }
+.out { display: inline-block; min-width: 64px; font-size: 12px; font-weight: 600;
+       border-radius: 999px; padding: 0 8px; text-align: center; background: var(--sunk);
+       color: var(--ink-2); }
+.out.fired { background: var(--teal); color: var(--teal-ink); }
+.out.broken, .out.failed { background: rgba(179, 38, 30, .14); color: var(--bad); }
+.out.needs_person, .out.limited { background: rgba(139, 58, 111, .12); color: var(--needs); }
+.out.learned { background: var(--teal-soft); color: var(--teal); }
+
+.looks { list-style: none; margin: 0; padding: 0; }
+.looks li { padding: 8px 0; border-top: 1px dashed var(--line); font-size: 14px; }
+.looks .when { color: var(--ink-3); font-variant-numeric: tabular-nums; margin-right: 8px; }
+.looks .found { margin: 4px 0 0 18px; padding: 0; color: var(--ink-2); }
+.looks .found li { border: 0; padding: 1px 0; }
+.looks details { margin-top: 4px; }
+.looks pre { white-space: pre-wrap; background: var(--sunk); border-radius: 8px; padding: 10px;
+             font: 13px/1.45 var(--sans); }
+.empty { color: var(--ink-3); }
+
+.inlet { background: var(--sheet); border: 1px solid var(--line); border-radius: 12px;
+         padding: 14px 16px; }
+.inlet .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.inlet .row b { min-width: 6ch; }
+.inlet code { background: var(--sunk); padding: 3px 6px; border-radius: 6px; word-break: break-all; }
+
+form.new { background: var(--sheet); border: 1px solid var(--line); border-radius: 12px;
+           padding: 16px; display: grid; gap: 10px; }
+form.new label { display: grid; gap: 3px; font-size: 14px; color: var(--ink-2); }
+form.new input, form.new textarea, form.new select { border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 9px; background: var(--paper); width: 100%; }
+form.new textarea { min-height: 54px; resize: vertical; }
+form.new .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+form.new .hint { font-size: 12px; color: var(--ink-3); }
+form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal-soft);
+                  border-radius: 8px; padding: 10px; }
+@media (max-width: 560px) {
+  form.new .two { grid-template-columns: 1fr; }
+  .state-line { margin-left: 0; text-align: left; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="mark">प्रहरी<small>Prahari — watches for what you're waiting for</small></div>
+    <div class="state-line" id="state-line">…</div>
+  </header>
+
+  <p class="note hidden" id="no-token">This page needs the link <code>prahari serve</code>
+    printed when it started (the part after <code>#token=</code>). Open that link once and
+    this browser remembers it.</p>
+  <p class="note bad hidden" id="error"></p>
+
+  <div class="bar"><h2>Watches</h2><span class="grow"></span>
+    <button class="btn main" type="button" id="new-open">New watch</button></div>
+  <form class="new hidden" id="new" autocomplete="off">
+    <p class="hint">Usually your agent writes these for you in a chat ("tell me when…").
+      Here you can write one by hand: a tool to look with, what to pick out of its answer,
+      and when that matters. <b>Try it</b> looks once and says what it sees.</p>
+    <label>Name <input name="name" placeholder="ALAB under $50" required></label>
+    <div class="two">
+      <label>Look with (a tool that reads) <input name="tool" placeholder="web_fetch"></label>
+      <label>…or listen at the inlet for <input name="listen" placeholder="whatsapp"></label>
+    </div>
+    <label>The tool's arguments (JSON) <input name="args" class="mono"
+      placeholder='{"url": "https://example.com/item"}'></label>
+    <div class="two">
+      <label>Pick <input name="pick" placeholder="number   ·   items:thread (\w+)   ·   json:title"></label>
+      <label>When <input name="when" placeholder="below 50   ·   new   ·   contains Mum" required></label>
+    </div>
+    <div class="two">
+      <label>Every <input name="every" placeholder="3h"></label>
+      <label>Most times a day <input name="max_per_day" type="number" min="1" max="200" value="10"></label>
+    </div>
+    <label>Then ask the agent (leave empty to just tell you)
+      <textarea name="then" placeholder="Tell me the new price and whether it's the lowest this month."></textarea></label>
+    <div class="tried hidden" id="tried"></div>
+    <div><button class="btn" type="button" id="try">Try it</button>
+      <button class="btn main" type="submit">Save</button>
+      <button class="btn link" type="button" id="new-close">Cancel</button></div>
+  </form>
+  <div id="watches"><p class="empty">Loading…</p></div>
+
+  <div class="bar"><h2>The inlet</h2></div>
+  <div class="inlet" id="inlet">…</div>
+
+  <div class="bar"><h2>Lately</h2><span class="grow"></span>
+    <span id="looks-of" class="empty"></span>
+    <button class="btn link hidden" type="button" id="looks-all">All watches</button></div>
+  <ul class="looks" id="looks"></ul>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get("token");
+  if (fromHash) {
+    token = fromHash;
+    try { localStorage.setItem("prahari-token", token); } catch (_) {}
+    history.replaceState(null, "", location.pathname);
+  } else {
+    try { token = localStorage.getItem("prahari-token") || ""; } catch (_) {}
+  }
+  async function api(method, path, body) {
+    const res = await fetch("/api/" + path, {
+      method, headers: { "Authorization": "Bearer " + token,
+                         "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    if (res.status === 401) { $("no-token").classList.remove("hidden"); throw new Error("no token"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    return data;
+  }
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const when = (iso) => { if (!iso) return "-"; const d = new Date(iso);
+    return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short",
+                                         hour: "2-digit", minute: "2-digit" }); };
+  const words = { learned: "learned", quiet: "quiet", fired: "fired", limited: "limited",
+    broken: "broken", failed: "failed", needs_person: "needs you", running: "looking",
+    interrupted: "stopped" };
+  function fail(err) { $("error").textContent = String(err.message || err);
+                       $("error").classList.remove("hidden"); }
+  let lookingAt = null;
+  let names = {};
+
+  async function status() {
+    const s = await api("GET", "status");
+    const on = s.serving;
+    $("state-line").innerHTML = `<span class="dot ${on ? "on" : ""}"></span>` +
+      (on ? "<b>Watching</b>" : "<b>Not running</b> (prahari serve)") +
+      ` · ${s.watches.active} active, ${s.watches.paused} paused` +
+      `<br>News goes to ${s.dvara ? "your chat, through Dvara" : "nobody yet (no Dvara set)"}`;
+  }
+
+  async function list() {
+    const { watches } = await api("GET", "watches");
+    names = Object.fromEntries(watches.map((w) => [w.id, w.name]));
+    const box = $("watches");
+    if (!watches.length) {
+      box.innerHTML = `<p class="empty">No watches yet. Ask your agent "tell me when…", or ` +
+        `<code>prahari add</code>.</p>`;
+      return;
+    }
+    box.innerHTML = watches.map((w) => {
+      const last = w.last_look;
+      return `<div class="watch" data-id="${esc(w.id)}">
+        <div class="top"><span class="name">${esc(w.name)}</span>
+          ${w.listen ? `<span class="tag listen">listens: ${esc(w.listen)}</span>` : ""}
+          ${w.state === "paused" ? `<span class="tag paused">paused</span>` : ""}
+          ${w.fired_today ? `<span class="tag">fired ${w.fired_today}× today</span>` : ""}</div>
+        <div class="says">${esc(w.sentence)}. ${esc(w.does)}.</div>
+        ${w.paused_because ? `<div class="paused-why">${esc(w.paused_because)}</div>` : ""}
+        <div class="last">${last ? `last: <span class="out ${esc(last.outcome)}">${esc(words[last.outcome] || last.outcome)}</span> ${when(last.started_at)} ${esc(last.value)}` : (w.listen ? "nothing heard yet" : "not looked yet")}
+          ${w.next_at && !w.listen && w.state === "active" ? ` · next look ${when(w.next_at)}` : ""}</div>
+        <div class="acts">
+          ${w.listen ? "" : `<button class="btn link" data-act="look">Look now</button>`}
+          <button class="btn link" data-act="${w.state === "paused" ? "resume" : "pause"}">${w.state === "paused" ? "Resume" : "Pause"}</button>
+          <button class="btn link" data-act="looks">Looks</button>
+          <button class="btn link danger" data-act="delete">Delete</button></div></div>`;
+    }).join("");
+  }
+
+  async function looks() {
+    const path = "looks?limit=40" + (lookingAt ? `&watch=${encodeURIComponent(lookingAt.id)}` : "");
+    const { looks } = await api("GET", path);
+    $("looks-of").textContent = lookingAt ? `of ${lookingAt.name}` : "";
+    $("looks-all").classList.toggle("hidden", !lookingAt);
+    $("looks").innerHTML = looks.length ? looks.map((l) => `<li>
+      <span class="when">${when(l.started_at)}</span>
+      <span class="out ${esc(l.outcome)}">${esc(words[l.outcome] || l.outcome)}</span>
+      ${lookingAt ? "" : `<b>${esc(names[l.watch] || l.watch)}</b> ·`} ${esc(l.value)}
+      ${l.turn ? ` · then: ${esc(l.turn)}` : ""}${l.notified ? " · sent" : ""}
+      ${l.found.length ? `<ul class="found">${l.found.slice(0, 5).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
+      ${l.detail && !["quiet", "fired"].includes(l.outcome) ? `<div class="empty">${esc(l.detail)}</div>` : ""}
+      ${l.reply ? `<details><summary>What the agent said</summary><pre>${esc(l.reply)}</pre></details>` : ""}
+      </li>`).join("") : `<li class="empty">Nothing yet.</li>`;
+  }
+
+  async function inlet() {
+    const s = await api("GET", "inlet");
+    const url = s.url || "(start prahari serve)";
+    const word = (s.words && s.words[0]) || "whatsapp";
+    $("inlet").innerHTML = `<p>Anything that can send a web request — MacroDroid or Tasker on
+      an Android phone (a notification arrives), a Home Assistant automation, a price
+      tracker's webhook — can tell Prahari something happened. Its key can only knock:
+      with it, nothing can be read or changed.</p>
+      <div class="row"><b>Send</b><code>POST ${esc(url)}${esc(word)}</code></div>
+      <div class="row"><b>Key</b><code id="key" data-key="${esc(s.key)}">••••••••••••</code>
+        <button class="btn link" type="button" id="show-key">Show</button>
+        <button class="btn link" type="button" id="copy-url">Copy the address with its key</button></div>
+      <div class="row"><b>Body</b><code>{"title": "[notification_title]", "text": "[notification]"}</code></div>
+      <div class="row"><b>Heard</b>${s.words.length ? s.words.map((w) => `<code>${esc(w)}</code>`).join(" ") : `<span class="empty">no watch listens yet</span>`}</div>`;
+    $("show-key").onclick = () => { $("key").textContent = $("key").dataset.key; };
+    $("copy-url").onclick = async () => {
+      try { await navigator.clipboard.writeText(`${url}${word}?key=${s.key}`);
+            $("copy-url").textContent = "Copied"; } catch (_) { $("key").textContent = $("key").dataset.key; }
+    };
+  }
+
+  $("watches").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]"); if (!btn) return;
+    const row = btn.closest(".watch"); const id = row.dataset.id;
+    const name = row.querySelector(".name").textContent;
+    try {
+      const act = btn.dataset.act;
+      if (act === "looks") { lookingAt = { id, name }; await looks(); $("looks").scrollIntoView({ behavior: "smooth" }); return; }
+      if (act === "delete" && !confirm(`Delete "${name}", its looks and what it saw?`)) return;
+      if (act === "delete") await api("DELETE", `watches/${id}`);
+      else await api("POST", `watches/${id}/${act}`);
+      if (act === "look") btn.textContent = "Looking…";
+      await refresh();
+    } catch (err) { fail(err); }
+  });
+  $("looks-all").onclick = async () => { lookingAt = null; await looks(); };
+
+  // -- the form ------------------------------------------------------------
+  const form = $("new");
+  $("new-open").onclick = () => { form.classList.remove("hidden"); form.name.focus(); };
+  $("new-close").onclick = () => form.classList.add("hidden");
+  const short = (text) => text.trim().startsWith("{") ? JSON.parse(text) : text.trim();
+  function recipe() {
+    const f = form.elements, out = {};
+    if (f.listen.value.trim()) out.listen = f.listen.value.trim();
+    else out.check = { tool: f.tool.value.trim(), args: f.args.value.trim() ? JSON.parse(f.args.value) : {} };
+    out.pick = pickOf(f.pick.value); out.when = whenOf(f.when.value);
+    if (!out.listen) out.every = f.every.value.trim() || "1h";
+    return out;
+  }
+  function pickOf(text) {
+    text = text.trim(); if (!text || text === "all") return {};
+    if (text.startsWith("{")) return JSON.parse(text);
+    const i = text.indexOf(":"); const kind = (i < 0 ? text : text.slice(0, i)).replace("-", "_");
+    const rest = i < 0 ? "" : text.slice(i + 1);
+    if (kind === "items_json") { const j = rest.lastIndexOf(":");
+      return { items_json: j < 0 ? rest : rest.slice(0, j), key: j < 0 ? "" : rest.slice(j + 1) }; }
+    return { [kind]: rest };
+  }
+  function whenOf(text) {
+    text = text.trim(); if (text.startsWith("{")) return JSON.parse(text);
+    const [word, ...rest] = text.split(/\s+/); const value = rest.join(" ");
+    const w = word.toLowerCase().replace("-", "_");
+    if (["changed", "new", "any"].includes(w) && !value) return { [w]: true };
+    if (["below", "above", "at_most", "at_least"].includes(w)) return { [w]: Number(value.replace(/[^\d.-]/g, "")) };
+    return { [w]: value };
+  }
+  $("try").onclick = async () => {
+    const box = $("tried"); box.classList.remove("hidden"); box.textContent = "Looking once…";
+    try {
+      const said = await api("POST", "preview", recipe());
+      box.textContent = `${said.sentence}.\n${said.said || ""}` +
+        (said.items && said.items.length ? "\n" + said.items.map((i) => "  • " + i).join("\n") : "") +
+        (said.result && said.found === false ? `\n\nWhat the tool said:\n${said.result}` : "");
+    } catch (err) { box.textContent = String(err.message || err); }
+  };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const body = { ...recipe(), name: form.elements.name.value, then: form.elements.then.value,
+                     max_per_day: Number(form.elements.max_per_day.value || 10) };
+      await api("POST", "watches", body);
+      form.reset(); form.classList.add("hidden"); $("tried").classList.add("hidden");
+      await refresh();
+    } catch (err) { fail(err); }
+  };
+
+  async function refresh() {
+    $("error").classList.add("hidden");
+    await Promise.all([status(), list()]);
+    await looks();
+  }
+  if (!token) { $("no-token").classList.remove("hidden"); return; }
+  refresh().then(inlet).catch(fail);
+  setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 15000);
+})();
+</script>
+</body>
+</html>
