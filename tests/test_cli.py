@@ -102,25 +102,32 @@ class TestPushAndPeople:
         assert mine["key"] != theirs["key"] and theirs["key"] == again["key"]
         assert fresh["key"] != theirs["key"] and theirs["for"] == "asha"
 
-    def test_a_mailbox_is_added_with_its_password_from_stdin(self, tmp_path, capsys,
-                                                             monkeypatch):
-        import io
+    def test_a_mailbox_names_its_setu_account_and_keeps_no_password(
+            self, tmp_path, capsys, monkeypatch):
+        import sys as _sys
 
         from fake_imap import FakeImap
 
         imap = FakeImap()
+        setu = tmp_path / "setu"
+        setu.write_text(f"#!{_sys.executable}\nimport json\nprint(json.dumps("
+                        f"{{'server': '127.0.0.1', 'port': {imap.port}, 'user': "
+                        "'me@example.com', 'password': 'app-password', 'folder': 'INBOX', "
+                        "'tls': False}))\n")
+        setu.chmod(0o755)
+        monkeypatch.setenv("PRAHARI_SETU", str(setu))
+        monkeypatch.delenv("PRAHARI_DVARA_URL", raising=False)
         try:
-            monkeypatch.setattr("sys.stdin", io.StringIO("app-password\n"))
-            rc, out, _ = run(tmp_path, capsys, "mailbox", "add", "work-mail", "--server",
-                             "127.0.0.1", "--port", str(imap.port), "--user",
-                             "me@example.com", "--password-stdin", "--no-tls")
+            rc, out, _ = run(tmp_path, capsys, "mailbox", "add", "work-mail", "--account",
+                             "mail:work")
         finally:
             imap.close()
         assert rc == 0 and "kept as work-mail" in out and "--wake work-mail" in out
         rc, out, _ = run(tmp_path, capsys, "mailbox", "list")
-        assert "work-mail" in out and "app-password" not in out
+        assert "mail:work" in out and "app-password" not in out
+        assert b"app-password" not in (tmp_path / "prahari.sqlite3").read_bytes()
         rc, out, _ = run(tmp_path, capsys, "mailbox", "rm", "work-mail")
-        assert rc == 0 and "forgotten" in out
+        assert rc == 0 and "stays in Setu" in out
 
 
 def test_a_file_made_before_wake_opens_and_gains_it(tmp_path):

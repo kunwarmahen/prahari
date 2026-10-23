@@ -61,9 +61,9 @@ several notifications for one mail.
 
 Two things knock for mail.
 
-**IMAP IDLE (any mail server).** `prahari mailbox add work-mail --server
-imap.fastmail.com --user me@…` keeps a folder open while `prahari serve`
-runs. IDLE is the IMAP command that lets the server write `* 12 EXISTS`
+**IMAP IDLE (any mail server).** `prahari mailbox add work-mail
+--account mail:work` keeps a Setu mail account's folder open while
+`prahari serve` runs. IDLE is the IMAP command that lets the server write `* 12 EXISTS`
 the moment a mail lands. Python's imaplib has no IDLE before 3.14, so
 mailbox.py says it by hand. It waits with `select`, never with a read
 that times out, because a socket file whose read timed out can't be
@@ -79,9 +79,25 @@ The mailbox's rules are a watch's rules again. The first connection only
 learns: it remembers the folder's next UID and knocks for nothing. Mail
 that came while the connection was down knocks when it's back, once
 each, by UID. A folder whose UIDVALIDITY changed is learned again,
-not replayed. The password (an app password, for most services) is kept
-in a file of its own, readable by you alone, and never in the SQLite
-file. Plain IMAP is refused except to this computer, for a test server.
+not replayed.
+
+**The password is Setu's.** The first version kept mailbox passwords in
+a file of Prahari's own, readable by you alone. It worked, and it was
+wrong for the house. It was a second secret store that no page showed
+and no lock covered. And Asha's password could only be typed in by
+whoever sat at the computer. So the account moved to Setu: `setu
+connect mail` (or the Mail card on Setu's page, a person's own page
+included) signs in and opens the folder before anything is kept, and the
+app password lives in that person's Setu folder, under their lock. A
+mailbox keeps only the account's name, `mail:work`. Each time it
+connects, it asks for the login afresh. This computer's person's comes
+from `setu login mail:work --json`. Anyone else's comes from Dvara's
+`POST /mail-login`, which runs that command in their folder with the key
+they unlocked it with. The login is held in memory while the connection
+is open. A password changed in Setu is used at the next connection, and
+a locked folder is said on the mailbox and tried again. IMAP isn't HTTP,
+so this is the one key that leaves Setu at all, and Setu's README says
+so plainly: it goes to one program, over a pipe, and never to a screen.
 
 **Gmail's push.** Gmail's `users.watch` tells a Google Cloud Pub/Sub
 topic each time mail arrives. Setu's Gmail connector gained
@@ -144,18 +160,36 @@ Thu 22 Oct 20:16  quiet      81,050.01
 
 (Dvara's log: `POST /call`, `POST /notify`, `POST /call`.)
 
-A mailbox for asha, a watch that listens to it, and a mail landing:
+Two mailboxes, one this computer's person's and one Asha's, each a
+Setu mail account (Asha's in her own Setu folder, under the scratch
+Dvara's state), and a mail landing:
 
 ```
-$ echo app-password | prahari mailbox add work-mail --server 127.0.0.1 --port 38279 --user asha@example.com --for asha --password-stdin --no-tls
-opened INBOX on 127.0.0.1 as asha@example.com; kept as work-mail for asha
-$ prahari add "Bank wrote" --listen work-mail --pick json:from --when 'contains bank' --as asha
-$ prahari serve --port 8784 --inlet-port 8797 --inlet-public-url https://beast.example.ts.net:8443
-inlet alone: https://beast.example.ts.net:8443/inlet/WORD
-mailbox work-mail (asha): listening to INBOX since 20:20
-fd04124a  Thu 22 Oct 20:20  fired      Bank <alerts@bank.example>  then: told
-              • from: Bank <alerts@bank.example> · to: me@example.com · subject: Your statement 2 · …
+$ setu connect mail --as work --mail-server 127.0.0.1 ... (a wrong password)
+error: mail:work: the mail server refused the user and password (for Gmail, iCloud and
+Outlook, use an app password from your account's security settings). Nothing was saved.
+$ setu connect mail --as work --mail-server 127.0.0.1 --mail-port <port> --user me@example.com --no-tls
+connected mail:work: opened INBOX on 127.0.0.1 as me@example.com (1 messages) — Read only
+$ SETU_HOME=<dvara state>/setu/asha setu connect mail --as home ... --user asha@example.com
+$ prahari mailbox add work-mail --account mail:work
+opened INBOX on 127.0.0.1 as me@example.com (mail:work); kept as work-mail for local
+$ prahari mailbox add home-mail --account mail:home --for asha
+opened INBOX on 127.0.0.1 as asha@example.com (mail:home); kept as home-mail for asha
+$ grep -rl app-password ~/.prahari        # nothing: no password anywhere in Prahari's folder
+$ prahari serve --port 8784
+mailbox work-mail (local): listening to INBOX since 21:08
+mailbox home-mail (asha): listening to INBOX since 21:08
+baab2b07  Thu 22 Oct 21:08  fired      Bank <alerts@bank.example>  then: told
+              • from: Bank <alerts@bank.example> · … · subject: Your statement 2 · … · mailbox: home-mail
+32ec4533  Thu 22 Oct 21:08  fired      Bank <alerts@bank.example>  then: told
+              • from: Bank <alerts@bank.example> · … · subject: Your statement 2 · … · mailbox: work-mail
 ```
+
+Each mailbox fired only its own person's watch. Dvara's log shows
+Asha's login fetched twice through `POST /mail-login`, once at `add` and
+once when `serve` connected. The mail already in the folder was learned
+and never told, and one mail that landed while `serve` was restarting
+knocked when it came back.
 
 The mail already in the folder was learned and never told. Each mail
 that landed after it knocked once, including one that landed while
@@ -212,8 +246,8 @@ yet: IMAP IDLE against a real mail server, and the Funnel script itself.
   with the Pub/Sub scope, which Setu's Gmail sign-in doesn't ask for, or
   a service account's signed token, which the standard library can't
   sign. A push to the public inlet needs neither.
-* **Passwords asked for in the chat.** A mailbox is added at the
-  computer (`prahari mailbox add --for NAME`). An agent would carry a
+* **Passwords asked for in the chat.** The account is added on Setu's
+  page (the person's own link) or at the computer. An agent would carry a
   person's mail password through a model's context and a chat log.
 * **The page and API on the public road**, at any token. The page is
   the house's.

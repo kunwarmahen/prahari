@@ -23,11 +23,15 @@ next UID is remembered and nothing knocks. After a dropped connection,
 mail that came meanwhile knocks when it is back (by UID, so once each);
 a folder whose UIDVALIDITY changed is learned again, not replayed.
 
-A PASSWORD, KEPT APART. IMAP needs one -- an app password, for Gmail, iCloud,
-Fastmail or Outlook -- and it is not in Prahari's SQLite file but in
-``mailboxes.secret.json`` beside it, readable by you alone. It is never
-printed, never sent anywhere but the mail server, over TLS (plain IMAP is
-refused except to this computer, for a test server).
+THE PASSWORD STAYS IN SETU. A mailbox names a Setu mail account
+(``mail:work``, added with ``setu connect mail``), and nothing else: the
+server, the address and the app password live in that person's Setu
+folder, under their lock. Each connection asks for the login afresh --
+this computer's person's from ``setu login <account> --json``, anyone
+else's from Dvara (``POST /mail-login``), which knows their folder and
+holds their unlock key -- and keeps it in memory only while it is open.
+A password changed in Setu is used at the next connection; a folder
+that is locked is said on the mailbox, and tried again.
 
 NOT GMAIL'S OWN PUSH. Gmail's push goes through Google Cloud Pub/Sub to a
 public address; that is ``renew`` and the public inlet (README). IDLE
@@ -44,6 +48,10 @@ import json
 import os
 import re
 import select
+import shlex
+import shutil
+import subprocess
+import sys
 import ssl
 import threading
 import time
@@ -53,8 +61,6 @@ from email.header import decode_header, make_header
 from pathlib import Path
 
 from prahari.store import Store, iso, now_utc
-
-SECRETS = "mailboxes.secret.json"
 #: RFC 2177: a client re-issues IDLE at least every 29 minutes.
 IDLE_FOR = 25 * 60
 #: How long connecting, signing in and one answer may take.
@@ -67,6 +73,9 @@ HEADERS = ("FROM", "TO", "SUBJECT", "DATE", "MESSAGE-ID")
 FETCH_CAP = 50
 
 _WORD = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_ACCOUNT = re.compile(r"^mail:[A-Za-z0-9][A-Za-z0-9._-]{0,39}$")
+#: How long asking Setu (or Dvara) for a login may take.
+LOGIN_LIMIT = 30
 _EXISTS = re.compile(rb"^\* \d+ EXISTS", re.I)
 
 
@@ -79,7 +88,10 @@ class Mailbox:
     #: The word it knocks on at the inlet ("work-mail").
     name: str
     owner: str
-    server: str
+    #: The Setu mail account it opens ("mail:work"): where the login lives.
+    account: str = ""
+    #: What the login said when it was added -- shown, never used to sign in.
+    server: str = ""
     port: int = 993
     user: str = ""
     folder: str = "INBOX"
@@ -98,86 +110,109 @@ class Mailbox:
         return asdict(self)
 
 
-def check_new(*, name: str, server: str, user: str, port: int = 993,
-              folder: str = "INBOX", tls: bool = True) -> None:
+def check_new(*, name: str, account: str) -> None:
     if not _WORD.match(name or ""):
         raise MailboxError(f"a mailbox's name is one short lowercase word (work-mail), "
                            f"not {name!r}: it is the word it knocks on at the inlet")
-    if not server or any(c.isspace() for c in server):
-        raise MailboxError("server is the mail server's name: imap.gmail.com, "
-                           "imap.fastmail.com, outlook.office365.com")
-    if not user:
-        raise MailboxError("user is the address you sign in to the mail server with")
-    if not 1 <= int(port) <= 65535:
-        raise MailboxError("port is a number (993 for IMAP over TLS)")
-    if not folder.strip():
-        raise MailboxError("folder is a mail folder's name (INBOX)")
-    if not tls and server not in ("127.0.0.1", "localhost", "::1"):
-        raise MailboxError("a mailbox is opened over TLS: a password sent in plain text "
-                           "to another computer is a password given away")
+    if not _ACCOUNT.match(account or ""):
+        raise MailboxError(f"account is a Setu mail account, mail:NAME, not {account!r} "
+                           "(add one with: setu connect mail --as NAME --mail-server HOST "
+                           "--user ADDRESS)")
 
 
-# -- the password, kept apart ---------------------------------------------------
+# -- the login, from Setu ------------------------------------------------------------
 
 
-def _secrets_path(state: Path) -> Path:
-    return Path(state) / SECRETS
+def find_setu() -> list[str]:
+    """``$PRAHARI_SETU`` (may be several words), else ``setu`` beside this
+    Python, else on PATH."""
+    configured = os.environ.get("PRAHARI_SETU", "").strip()
+    if configured:
+        return shlex.split(configured)
+    beside = Path(sys.executable).parent / "setu"
+    if beside.exists():
+        return [str(beside)]
+    found = shutil.which("setu")
+    if found:
+        return [found]
+    raise MailboxError("cannot find setu, which keeps the mail password: install it, or "
+                       "set PRAHARI_SETU to the command that starts it")
 
 
-def _read_secrets(state: Path) -> dict:
+class Logins:
+    """Where a mailbox's login comes from: this computer's person's Setu
+    folder, or -- for anyone else in the house -- Dvara, as them."""
+
+    def __init__(self, home: set[str] | None = None, dvara=None,
+                 command: list[str] | None = None) -> None:
+        self.home = set(home or {"local"})
+        self.dvara = dvara
+        self.command = command
+
+    def __call__(self, box: Mailbox) -> dict:
+        if box.owner in self.home or self.dvara is None:
+            if box.owner not in self.home:
+                raise MailboxError(f"{box.owner}'s mail is in their own Setu folder, which "
+                                   "this Prahari reaches through Dvara: set "
+                                   "PRAHARI_DVARA_URL and PRAHARI_DVARA_TOKEN")
+            return self._here(box.account)
+        return self._through_dvara(box)
+
+    def _here(self, account: str) -> dict:
+        argv = [*(self.command or find_setu()), "login", account, "--json"]
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=LOGIN_LIMIT, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise MailboxError(f"could not ask setu for {account}: {exc}") from None
+        return _login_from(done.stdout, done.stderr, account)
+
+    def _through_dvara(self, box: Mailbox) -> dict:
+        from prahari.dvara import DvaraError
+        try:
+            said = self.dvara.call("POST", "/mail-login",
+                                   {"actor": box.owner, "ref": box.account},
+                                   timeout=LOGIN_LIMIT)
+        except (DvaraError, TimeoutError) as exc:
+            raise MailboxError(f"{box.owner}'s {box.account}: {exc}") from None
+        return _login_from(json.dumps(said), "", box.account)
+
+
+def _login_from(out: str, err: str, account: str) -> dict:
     try:
-        data = json.loads(_secrets_path(state).read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_secrets(state: Path, data: dict) -> None:
-    path = _secrets_path(state)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as out:
-        json.dump(data, out)
-    os.chmod(path, 0o600)
-
-
-def password_of(state: Path, box: Mailbox) -> str:
-    return str(_read_secrets(state).get(f"{box.owner}/{box.name}") or "")
-
-
-def keep_password(state: Path, box: Mailbox, password: str) -> None:
-    data = _read_secrets(state)
-    data[f"{box.owner}/{box.name}"] = password
-    _write_secrets(state, data)
-
-
-def forget_password(state: Path, box: Mailbox) -> None:
-    data = _read_secrets(state)
-    if data.pop(f"{box.owner}/{box.name}", None) is not None:
-        _write_secrets(state, data)
+        data = json.loads((out or "").strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        raise MailboxError(f"setu gave no login for {account}: "
+                           f"{' '.join((err or '').split())[:300] or 'no answer'}") from None
+    if not isinstance(data, dict) or data.get("error"):
+        raise MailboxError(str((data or {}).get("error") or f"no login for {account}"))
+    missing = [k for k in ("server", "port", "user", "password") if not data.get(k)]
+    if missing:
+        raise MailboxError(f"setu's login for {account} lacks {', '.join(missing)}")
+    return data
 
 
 # -- adding one -------------------------------------------------------------------
 
 
-def add(store: Store, state: Path, *, name: str, owner: str, server: str, user: str,
-        password: str, port: int = 993, folder: str = "INBOX", tls: bool = True,
+def add(store: Store, *, name: str, owner: str, account: str, logins: Logins,
         opener=None) -> tuple[Mailbox, str]:
-    """Check it opens, then keep it. (the mailbox, what the server said)."""
-    check_new(name=name, server=server, user=user, port=port, folder=folder, tls=tls)
-    if not password:
-        raise MailboxError("a mailbox needs its password (an app password, for most "
-                           "mail services)")
+    """Check it opens, with the login Setu keeps, then keep it -- the name
+    of the account, never the password. (the mailbox, what was said)."""
+    check_new(name=name, account=account)
     if store.mailbox(owner, name) is not None:
         raise MailboxError(f"{owner} has a mailbox {name!r} already; remove it first")
-    box = Mailbox(name=name, owner=owner, server=server, port=int(port), user=user,
-                  folder=folder.strip(), tls=tls, made_at=iso(now_utc()))
+    box = Mailbox(name=name, owner=owner, account=account, made_at=iso(now_utc()))
+    login = logins(box)
+    box.server, box.port, box.user = login["server"], int(login["port"]), login["user"]
+    box.folder, box.tls = login.get("folder") or "INBOX", bool(login.get("tls", True))
     try:
-        conn = (opener or open_folder)(box, password)
+        conn = (opener or open_folder)(login)
     except MailboxError:
         raise
     except (OSError, imaplib.IMAP4.error, ssl.SSLError) as exc:
-        raise MailboxError(f"could not open {folder} on {server}: {_said(exc)}") from None
+        raise MailboxError(f"could not open {box.folder} on {box.server}: {_said(exc)}") \
+            from None
     try:
         validity, next_uid = folder_marks(conn, box.folder)
     finally:
@@ -186,35 +221,34 @@ def add(store: Store, state: Path, *, name: str, owner: str, server: str, user: 
     box.said = "opened; listening starts with prahari serve"
     box.said_at = iso(now_utc())
     store.put_mailbox(box)
-    keep_password(state, box, password)
-    return box, f"opened {folder} on {server} as {user}"
+    return box, f"opened {box.folder} on {box.server} as {box.user} ({account})"
 
 
-def remove(store: Store, state: Path, owner: str, name: str) -> Mailbox:
+def remove(store: Store, owner: str, name: str) -> Mailbox:
     box = store.mailbox(owner, name)
     if box is None:
         raise MailboxError(f"{owner} has no mailbox {name!r}")
     store.delete_mailbox(owner, name)
-    forget_password(state, box)
     return box
 
 
 # -- IMAP ---------------------------------------------------------------------------
 
 
-def open_folder(box: Mailbox, password: str) -> imaplib.IMAP4:
-    """Signed in, the folder opened read-only."""
-    if box.tls:
-        conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(box.server, box.port,
-                                                timeout=CONNECT_TIMEOUT,
+def open_folder(login: dict) -> imaplib.IMAP4:
+    """Signed in with Setu's login, the folder opened read-only."""
+    server, port = login["server"], int(login["port"])
+    if login.get("tls", True):
+        conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(server, port, timeout=CONNECT_TIMEOUT,
                                                 ssl_context=ssl.create_default_context())
     else:
-        conn = imaplib.IMAP4(box.server, box.port, timeout=CONNECT_TIMEOUT)
+        conn = imaplib.IMAP4(server, port, timeout=CONNECT_TIMEOUT)
+    folder = login.get("folder") or "INBOX"
     try:
-        conn.login(box.user, password)
-        kind, said = conn.select(_quoted(box.folder), readonly=True)
+        conn.login(login["user"], login["password"])
+        kind, said = conn.select(_quoted(folder), readonly=True)
         if kind != "OK":
-            raise MailboxError(f"no folder {box.folder!r}: {_words(said)}")
+            raise MailboxError(f"no folder {folder!r}: {_words(said)}")
     except BaseException:
         _close(conn)
         raise
@@ -317,12 +351,13 @@ class Keeper:
     ``knock(word, body, owners)`` is the clock's ``hear``: each new mail is
     sent to the inlet as the mailbox's person, on the mailbox's name."""
 
-    def __init__(self, store: Store, state: Path, box: Mailbox,
-                 knock: Callable[[str, dict, set[str]], int], *, opener=None,
+    def __init__(self, store: Store, box: Mailbox,
+                 knock: Callable[[str, dict, set[str]], int], logins: Logins, *,
+                 opener=None,
                  idle_for: float = IDLE_FOR, backoff: tuple = BACKOFF,
                  log: Callable[[str], None] | None = None) -> None:
         self.store = store
-        self.state = state
+        self.logins = logins
         self.box = box
         self.knock = knock
         self.opener = opener or open_folder
@@ -354,10 +389,8 @@ class Keeper:
 
     def once(self) -> None:
         """One connection: catch up, then IDLE until it drops or ``stop``."""
-        password = password_of(self.state, self.box)
-        if not password:
-            raise MailboxError("no password kept for it: remove it and add it again")
-        conn = self.opener(self.box, password)
+        # asked afresh each time: a password changed in Setu is used now
+        conn = self.opener(self.logins(self.box))
         try:
             validity, next_uid = folder_marks(conn, self.box.folder)
             if self.box.last_uid is None or validity != self.box.uidvalidity:

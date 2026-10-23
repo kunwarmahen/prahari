@@ -14,8 +14,8 @@ tables:
 * ``inlet_key`` -- each person's own key to the inlet (http.py), so what
   one person's phone says reaches only that person's watches;
 * ``mailbox`` -- the mail folders Prahari keeps open (mailbox.py), and
-  where each one got to. Their passwords are not here: they are in a
-  file of their own, readable by you alone.
+  where each one got to. Each names a Setu mail account; the password is
+  in Setu, never here.
 
 A LOOK THAT FOUND NOTHING IS A ROW TOO (``quiet``). "Is it still
 watching?" deserves an answer with a time on it, not an absence.
@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS inlet_key (
 CREATE TABLE IF NOT EXISTS mailbox (
     name TEXT NOT NULL,
     owner TEXT NOT NULL,
+    account TEXT NOT NULL DEFAULT '',
     server TEXT NOT NULL,
     port INTEGER NOT NULL,
     user TEXT NOT NULL,
@@ -231,7 +232,8 @@ CREATE TABLE IF NOT EXISTS mailbox (
 #: Columns a file made before them lacks, added on open: (name, SQL type).
 _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("renew", "TEXT NOT NULL DEFAULT '{}'"),
-                    ("renew_at", "TEXT"))}
+                    ("renew_at", "TEXT")),
+          "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
 
 
 class Store:

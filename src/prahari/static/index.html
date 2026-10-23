@@ -302,15 +302,16 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   async function mailboxes() {
     const { mailboxes } = await api("GET", "mailboxes");
     $("mailboxes").innerHTML = mailboxes.length ? mailboxes.map((b) => `
-      <div class="row"><b>${esc(b.name)}</b><code>${esc(b.user)} on ${esc(b.server)} · ${esc(b.folder)}</code>
+      <div class="row"><b>${esc(b.name)}</b><code>${esc(b.account)}: ${esc(b.user)} on ${esc(b.server)} · ${esc(b.folder)}</code>
         <span class="${b.state === "trouble" ? "bad" : "empty"}">${esc(b.said || b.state)}</span>
         <span class="empty">for ${esc(b.owner)}</span></div>`).join("") +
       `<p class="hint">A new mail knocks on its name: a watch can listen for it (who it is from,
         the subject) or be woken by it to look at once.</p>`
       : `<p class="hint">A mail folder kept open (IMAP IDLE) tells Prahari the moment mail
-        lands, instead of a look every half hour. Add one at this computer:
-        <code>prahari mailbox add work-mail --server imap.fastmail.com --user you@example.com</code>
-        (it asks for an app password, kept for you alone).</p>`;
+        lands, instead of a look every half hour. Add the mail account in Setu first (its
+        page's <b>Mail (IMAP)</b> card, or <code>setu connect mail --as work …</code>: the
+        app password stays there), then here: <code>prahari mailbox add work-mail
+        --account mail:work</code>.</p>`;
   }
 
   $("watches").addEventListener("click", async (e) => {

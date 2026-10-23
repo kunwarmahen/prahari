@@ -13,8 +13,9 @@
     prahari allow ID TOOL...                    let its then-turn use more tools unasked
     prahari add "Mail from the bank" ... --every 6h --wake work-mail
                                                 looks at once when work-mail knocks
-    prahari mailbox add work-mail --server imap.fastmail.com --user me@example.com
-                                                a mail folder kept open (IMAP IDLE)
+    prahari mailbox add work-mail --account mail:work
+                                                a mail folder kept open (IMAP IDLE), its
+                                                login in Setu (setu connect mail)
     prahari mailbox list | rm NAME
     prahari hear WORD JSON [--for WHO]          try the inlet without the network
     prahari serve [--port 8782] [--inlet-port 8783]
@@ -185,18 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("mailbox", help="mail folders kept open, knocking when mail "
                                        "comes (IMAP IDLE)")
     msub = p.add_subparsers(dest="mailbox_command", required=True)
-    m = msub.add_parser("add", help="keep a mail folder open; asks for its password")
+    m = msub.add_parser("add", help="keep a Setu mail account's folder open")
     m.add_argument("name", help="the word it knocks on at the inlet (work-mail)")
-    m.add_argument("--server", required=True, help="imap.gmail.com, imap.fastmail.com, ...")
-    m.add_argument("--user", required=True, help="the address you sign in with")
-    m.add_argument("--port", type=int, default=993)
-    m.add_argument("--folder", default="INBOX")
+    m.add_argument("--account", required=True, metavar="mail:NAME",
+                   help="the Setu mail account it opens; add one first with: setu connect "
+                        "mail --as NAME --mail-server HOST --user ADDRESS")
     m.add_argument("--for", dest="person", default="", metavar="WHO",
-                   help="whose mailbox it is (default: this computer's person)")
-    m.add_argument("--password-stdin", action="store_true", dest="password_stdin",
-                   help="read the password from stdin instead of asking")
-    m.add_argument("--no-tls", action="store_true", dest="no_tls",
-                   help="plain IMAP, to this computer only (a test server)")
+                   help="whose mailbox it is (default: this computer's person); their "
+                        "account is in their own Setu folder, reached through Dvara")
     m.add_argument("--json", action="store_true", dest="json_out")
     m = msub.add_parser("list", help="every mailbox, and how it is doing")
     m.add_argument("--json", action="store_true", dest="json_out")
@@ -484,6 +481,12 @@ def _home() -> set[str]:
     return {watches.LOCAL_OWNER, *([dvara.actor] if dvara and dvara.actor else [])}
 
 
+def _logins() -> mailbox.Logins:
+    """A mailbox's login: this computer's person's from Setu, anyone else's
+    through Dvara, as them."""
+    return mailbox.Logins(home=_home(), dvara=_dvara())
+
+
 def _clock(state: Path, store: Store, on_record=None) -> Clock:
     dvara = _dvara()
     runners: dict = {"direct": DirectRunner(state / "work", ask=dvara)}
@@ -539,16 +542,8 @@ def _mailbox(args, store: Store, state: Path) -> int:
     owner = (getattr(args, "person", "") or "").strip() or watches.LOCAL_OWNER
     try:
         if which == "add":
-            if args.password_stdin:
-                password = sys.stdin.readline().rstrip("\n")
-            else:
-                import getpass
-                password = getpass.getpass(f"password for {args.user} on {args.server} "
-                                           "(an app password, for most services): ")
-            box, said = mailbox.add(store, state, name=args.name, owner=owner,
-                                    server=args.server, user=args.user,
-                                    password=password, port=args.port,
-                                    folder=args.folder, tls=not args.no_tls)
+            box, said = mailbox.add(store, name=args.name, owner=owner,
+                                    account=args.account, logins=_logins())
             if args.json_out:
                 print(json.dumps(box.as_dict()))
             else:
@@ -566,17 +561,18 @@ def _mailbox(args, store: Store, state: Path) -> int:
                 print(json.dumps([b.as_dict() for b in boxes]))
                 return 0
             if not boxes:
-                print("no mailboxes (prahari mailbox add NAME --server HOST --user ADDRESS)")
+                print("no mailboxes (setu connect mail --as work ..., then prahari mailbox "
+                      "add work-mail --account mail:work)")
             for box in boxes:
-                print(f"{box.name:<12} {box.owner:<10} {box.user} on {box.server} "
-                      f"{box.folder}  [{box.state}]")
+                print(f"{box.name:<12} {box.owner:<10} {box.account}: {box.user} on "
+                      f"{box.server} {box.folder}  [{box.state}]")
                 if box.said:
                     print(f"             {box.said} ({_short(box.said_at)})")
             return 0
         if which == "rm":
-            box = mailbox.remove(store, state, owner, args.name)
+            box = mailbox.remove(store, owner, args.name)
             print(json.dumps({"removed": box.name}) if args.json_out
-                  else f"removed {box.name}; its password is forgotten")
+                  else f"removed {box.name}; its account stays in Setu ({box.account})")
             return 0
     except mailbox.MailboxError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -653,7 +649,8 @@ def _serve(store: Store, state: Path, *, host: str, port: int,
         print(line)
         sys.stdout.flush()
 
-    keepers = [mailbox.Keeper(store, state, box, clock.hear, log=said)
+    logins = _logins()
+    keepers = [mailbox.Keeper(store, box, clock.hear, logins, log=said)
                for box in store.mailboxes()]
     for keeper in keepers:
         keeper.start()

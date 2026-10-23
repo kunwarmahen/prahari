@@ -18,6 +18,23 @@ thing you were waiting for happens. Things that can tell you
 themselves, like a phone that just got a notification or a webhook,
 knock on Prahari's **inlet** instead, and the same recipe decides.
 
+### Samay or Prahari?
+
+Both repeat things, so they're easy to mix up. The question to ask is
+*is this about a time, or about something happening?*
+
+| You say | It's | Use |
+|---|---|---|
+| "Every morning at 8, summarise my mail" | something done **at a time** | **Samay**: a schedule. At each time, the agent does the whole job |
+| "Remind me on Friday to call the plumber" | something done **at a time** | **Samay** |
+| "Tell me when ALAB drops under $50" | **waiting** for something to happen | **Prahari**: a watch. It peeks with no model and wakes the agent only when it happens |
+| "Tell me as soon as the bank writes" | **waiting** | **Prahari**, with a mailbox that says so the moment mail lands |
+
+A watch's *every 30 minutes* isn't an appointment. It's only how often
+Prahari peeks until the thing happens, and a knock (a mailbox, a phone)
+can make it peek at once. You don't have to choose yourself: ask your
+agent in plain words, and it picks. Its instructions draw the same line.
+
 ## The name
 
 **prahari** — प्रहरी (Sanskrit *praharī*; said roughly *pruh-huh-ree*).
@@ -118,10 +135,11 @@ prahari serve
 #   page: http://127.0.0.1:8782/#token=…     open this once; the browser keeps it
 #   inlet: http://127.0.0.1:8782/inlet/WORD  (key: prahari inlet)
 
-# mail the moment it lands: a mail folder kept open (IMAP IDLE)
-prahari mailbox add work-mail --server imap.fastmail.com --user me@example.com
-#   password for me@example.com on imap.fastmail.com (an app password, for most services):
-#   opened INBOX on imap.fastmail.com as me@example.com; kept as work-mail for local
+# mail the moment it lands: a mail account in Setu, its folder kept open (IMAP IDLE)
+setu connect mail --as work --mail-server imap.fastmail.com --user me@example.com
+#   the mail password (an app password) (not shown):
+prahari mailbox add work-mail --account mail:work
+#   opened INBOX on imap.fastmail.com as me@example.com (mail:work); kept as work-mail for local
 prahari add "The bank wrote" --listen work-mail --pick json:from --when 'contains bank'
 # ...or keep a Gmail search as the check, and look at once when mail lands
 prahari add "Mail from the bank" --check mcp__gmail__search_threads \
@@ -194,7 +212,8 @@ that reads.
 | `ask is this an invoice?` | a yes/no for a model, asked only about a value that changed or items that are new |
 
 **every** — `30m`, `3h`, `1d`: five minutes at the least, seven days at
-the most (less often than that is a schedule, and Samay's job).
+the most (less often than that is a schedule, and Samay's job: see
+*Samay or Prahari?* above).
 
 **wake** — a word at the inlet that makes a watch that looks look *now*,
 not only every `every`: a mailbox's name, or the word Gmail's push
@@ -292,17 +311,28 @@ moment a mail lands, and both knock on the inlet, as their person:
 Fastmail, iCloud, Outlook, your own.
 
 ```bash
-prahari mailbox add work-mail --server imap.gmail.com --user me@gmail.com [--for asha]
+# 1. the account, in Setu (or its page's Mail (IMAP) card), once
+setu connect mail --as work --mail-server imap.gmail.com --user me@gmail.com
+# 2. the mailbox, here
+prahari mailbox add work-mail --account mail:work [--for asha]
 prahari mailbox list
-#   work-mail    local      me@gmail.com on imap.gmail.com INBOX  [listening]
+#   work-mail    local      mail:work: me@gmail.com on imap.gmail.com INBOX  [listening]
 #                listening to INBOX since 08:14 (Thu 22 Oct 08:14)
-prahari mailbox rm work-mail
+prahari mailbox rm work-mail          # the account stays in Setu
 ```
 
-It asks for the password: for Gmail, iCloud and Outlook an *app
-password* (your account's security settings make one), never your own.
-It's kept in `~/.prahari/mailboxes.secret.json`, readable by you alone,
-and sent nowhere but the mail server, over TLS. While `prahari serve`
+**The password stays in Setu.** Setu asks for it, hidden: for Gmail,
+iCloud and Outlook an *app password* (your account's security settings
+make one), never your own. It's kept in your Setu folder like every
+other sign-in, under your lock if you set one. Prahari keeps only the
+account's name. Each time it opens the folder it asks Setu for the login
+(`setu login mail:work --json`), holds it in memory while the
+connection is open, and sends it nowhere but the mail server, over TLS.
+Change the password in Setu, and the next connection uses it. Someone
+else in the house adds the account in their own Setu folder (their
+Setu link from Dvara's `/accounts page`, the same Mail card). Their
+mailbox (`--for asha`) gets its login through Dvara, which knows their
+folder and holds the key they unlocked it with. While `prahari serve`
 runs, each new mail knocks on the mailbox's name with its `from`, `to`,
 `subject`, `date` and `id`, never a word of what it says, and nothing
 is marked read. The first connection only learns what's there. Mail
@@ -472,11 +502,12 @@ offer watches to everyone.
 | `PRAHARI_TOKEN` | the page's token, instead of the one kept in the state folder |
 | `PRAHARI_INLET_TOKEN` | the inlet's key, instead of the one kept in the state folder |
 | `PRAHARI_PUBLIC_URL` | where a browser reaches the page when that isn't where it is bound (a container's port mapping) |
+| `PRAHARI_SETU` | the command that starts Setu, for a mailbox's login (default: `setu` beside Prahari, else on PATH) |
 | `PRAHARI_INLET_PORT` | the inlet alone on this port, for the public road (also `--inlet-port`) |
 | `PRAHARI_INLET_PUBLIC_URL` | where the internet reaches that inlet: its Tailscale Funnel name (also `--inlet-public-url`) |
 
-Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`, except
-mailbox passwords, which are in `~/.prahari/mailboxes.secret.json`. Each
+Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`; no
+password is ever kept here (a mailbox's is in Setu). Each
 watch's looks work in a folder of their own, `~/.prahari/work/<id>`.
 
 ### Keeping it running
@@ -511,8 +542,9 @@ src/prahari/
 ├── dvara.py     the Dvara road: /call for a look as the person, /notify for
 │                news, /message for a turn as the person (came_by prahari).
 │                Standard library only ([notes/02](notes/02-a-watch-for-everyone.md))
-├── mailbox.py   mail pushed: a folder kept open with IMAP IDLE, each new
-│                mail's headers a knock as its person; passwords kept apart
+├── mailbox.py   mail pushed: a Setu mail account's folder kept open with
+│                IMAP IDLE, each new mail's headers a knock as its person; the
+│                login asked of Setu (or Dvara, for another person) each time
 ├── http.py      the page, its JSON API (the page's token), and the inlet
 │                (keys of their own, one a person, that can only knock; a
 │                Pub/Sub push unwrapped; 60 knocks a minute); the inlet
@@ -530,7 +562,7 @@ deploy/
 
 The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
 inlet alone for the public road, the page and the agent's tools work,
-and are covered by 147 tests. The API is not stable.
+and are covered by 151 tests. The API is not stable.
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a
