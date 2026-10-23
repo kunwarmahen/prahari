@@ -564,6 +564,9 @@ The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
 inlet alone for the public road, the page and the agent's tools work,
 and are covered by 151 tests. The API is not stable.
 
+Run for real: a watch on a real mail account, made from the chat,
+fired and woke the agent.
+
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a
 local test server stands in, [notes/02](notes/02-a-watch-for-everyone.md)),
