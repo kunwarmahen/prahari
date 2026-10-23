@@ -509,6 +509,10 @@ offer watches to everyone.
 Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`; no
 password is ever kept here (a mailbox's is in Setu). Each
 watch's looks work in a folder of their own, `~/.prahari/work/<id>`.
+`prahari keeps --json` (`prahari.keeps.v1`) says so to a backup
+(Sarathi's `sarathi backup`): the state folder, inlet key and all, so a
+restored house keeps its senders. The running watch's record
+(`serve.json`) stays out. It answers before the file is opened.
 
 ### Keeping it running
 
@@ -553,6 +557,7 @@ src/prahari/
 deploy/
 └── public-inlet-tailscale.sh   the inlet alone on a public HTTPS name (Funnel)
 ├── mcp.py       the agent's tools, for one person (stdio MCP, by hand)
+├── keeps.py     prahari keeps --json: where the watches are, for a backup
 ├── status.py    prahari status --json: here, watching (a lock, not a pid)
 ├── unit.py      prahari unit: a systemd user unit
 └── cli.py       the commands above
@@ -562,7 +567,7 @@ deploy/
 
 The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
 inlet alone for the public road, the page and the agent's tools work,
-and are covered by 151 tests. The API is not stable.
+and are covered by 153 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent.

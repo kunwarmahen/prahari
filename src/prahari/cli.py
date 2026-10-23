@@ -24,6 +24,7 @@
     prahari inlet [--for WHO] [--new-key]       the inlet's address and key, for a sender
     prahari mcp --for WHO [--agent A]           the tools an agent uses (MCP, stdio)
     prahari status [--json]                     is it watching, and where
+    prahari keeps [--json]                      where the watches are kept, for a backup
     prahari unit [--install]                    keep it running (systemd)
 
 ``--pick`` and ``--when`` take a short form (``number``, ``items:REGEX``,
@@ -214,12 +215,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("status", help="is it watching, and where")
     p.add_argument("--json", action="store_true", dest="json_out")
+
+    p = sub.add_parser("keeps", help="where the watches are kept, for a backup")
+    p.add_argument("--json", action="store_true", dest="json_out")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     state = state_dir(args.state)
+    if args.command == "keeps":
+        # before the store is opened: asking where never makes the file
+        from prahari.keeps import report as keeps
+        said = keeps(state)
+        if args.json_out:
+            print(json.dumps(said))
+        else:
+            for place in said["keeps"]:
+                print(f"{place['id']}  {place['path']}"
+                      + ("" if place["exists"] else "  (not there yet)"))
+                print(f"       {place['what']}")
+        return 0
     try:
         store = Store(state / "prahari.sqlite3")
     except OSError as exc:
