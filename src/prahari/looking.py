@@ -111,11 +111,9 @@ def yantra_home() -> Path | None:
 
 
 def look_agent(watch: Watch) -> str:
-    """The package a look is made with. On the direct road a watch's agent
-    is a package folder, and the look uses it (a package's own tools are
-    there). On the Dvara road it is a NAME on Dvara's roster, which this
-    Yantra cannot open: the look is made with plain Yantra and this
-    computer's accounts, and Dvara runs the named agent when it fires."""
+    """The package a look at this computer is made with: a package folder,
+    on the direct road. (On the Dvara road the look is not made here at
+    all: it goes to Dvara as the person, ``Roads``.)"""
     return watch.agent if watch.runner == "direct" else ""
 
 
@@ -185,6 +183,30 @@ class Caller:
                       detail=str(data.get("detail") or ""),
                       needs=[str(n) for n in data.get("needs_person") or []],
                       busy=[str(b) for b in data.get("busy") or []])
+
+
+class Roads:
+    """Each watch's look on its own road.
+
+    THE LOOK GOES THE WAY THE WORK GOES. A watch on the direct road looks
+    here, ``yantra --call`` with this computer's accounts -- the owner's.
+    A watch on the Dvara road is a person's in the house, and its look
+    goes to Dvara as them (``prahari.dvara.DvaraCaller``), with their own
+    accounts. So a guest's watch reads the guest's mail, and never the
+    owner's."""
+
+    def __init__(self, direct: Caller, dvara=None) -> None:
+        self.direct = direct
+        self.dvara = dvara
+
+    def call(self, watch: Watch, *, granted: bool = True) -> Called:
+        if watch.runner != "dvara":
+            return self.direct.call(watch, granted=granted)
+        if self.dvara is None:
+            return Called(ok=False, detail=(
+                "this watch looks through Dvara, as its person, and this Prahari has "
+                "no Dvara (set PRAHARI_DVARA_URL and PRAHARI_DVARA_TOKEN)"))
+        return self.dvara.call(watch, granted=granted)
 
 
 class Asker:

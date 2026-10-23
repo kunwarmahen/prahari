@@ -13,6 +13,14 @@ ONE PERSON'S WATCHES ARE THAT PERSON'S. ``find`` with an ``owner``
 treats someone else's watch as no watch at all: the agent's tools are
 started for one person, and the id of another's is not a door into it.
 
+A KNOCK CAN WAKE A WATCH THAT LOOKS (``wake``). Mail that a mailbox or
+Gmail pushes needs no recipe of its own: the watch keeps its check, and a
+knock on its word at the inlet makes it look now rather than at its next
+``every`` -- which stays, as the look that happens anyway if a push is
+lost. ``renew`` is the call that keeps such a sender knocking (Gmail's
+push lasts seven days): checked like a check, granted word for word
+because the person accepted it on the same card.
+
 A CAP PER PERSON (``$PRAHARI_MAX_WATCHES``, default 30). A watch looks on
 its own, forever, and every look starts a program; a loop in a model's
 reasoning should not be able to leave hundreds behind.
@@ -49,8 +57,26 @@ def max_watches() -> int:
         return 30
 
 
+def _call(raw, what: str) -> dict:
+    """``{"tool": NAME, "args": {...}}``, checked; WatchError in words."""
+    call = recipe._form(raw, what)
+    if not call:
+        return {}
+    unknown = [k for k in call if k not in ("tool", "args")]
+    if unknown:
+        raise WatchError(f"unknown key(s) {', '.join(unknown)} in {what}; known: "
+                         "tool, args")
+    tool = str(call.get("tool") or "")
+    if not _TOOL.match(tool):
+        raise WatchError(f"{what} tool is a tool's exact name, not {tool!r}")
+    args = call.get("args") or {}
+    if not isinstance(args, dict):
+        raise WatchError(f"{what} args is an object of the tool's arguments")
+    return {"tool": tool, "args": args}
+
+
 def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=None,
-            every: str = "") -> dict:
+            every: str = "", wake: str = "", renew=None) -> dict:
     """The recipe's parts, checked together; WatchError in words."""
     try:
         check = recipe._form(check, "check")
@@ -60,19 +86,17 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
         if not check and not listen:
             raise WatchError("a watch needs a check -- {\"tool\": NAME, \"args\": {...}} "
                              "-- or a listen word for the inlet")
+        wake = (wake or "").strip().lower()
+        renew = _call(renew, "renew")
         if check:
-            unknown = [k for k in check if k not in ("tool", "args")]
-            if unknown:
-                raise WatchError(f"unknown key(s) {', '.join(unknown)} in check; known: "
-                                 "tool, args")
-            tool = str(check.get("tool") or "")
-            if not _TOOL.match(tool):
-                raise WatchError(f"check tool is a tool's exact name, not {tool!r}")
-            args = check.get("args") or {}
-            if not isinstance(args, dict):
-                raise WatchError("check args is an object of the tool's arguments")
-            check = {"tool": tool, "args": args}
+            check = _call(check, "check")
             recipe.every(every)
+            if wake and not _WORD.match(wake):
+                raise WatchError(f"wake is one short lowercase word at the inlet "
+                                 f"(gmail, mail-work), not {wake!r}")
+            if renew and not wake:
+                raise WatchError("renew keeps a sender knocking, so it goes with wake: "
+                                 "the word that sender knocks on")
         else:
             if not _WORD.match(listen):
                 raise WatchError(f"listen is one short lowercase word (whatsapp, "
@@ -80,6 +104,9 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
             if every:
                 raise WatchError("a watch that listens has no every: it hears when "
                                  "something is sent")
+            if wake or renew:
+                raise WatchError("wake and renew are for a watch that looks; one that "
+                                 "listens hears its word already")
         pick = recipe.check_pick(pick)
         when = recipe.check_when((when or {"any": True}) if listen else when, pick)
     except recipe.RecipeError as exc:
@@ -90,20 +117,24 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
     if not name:
         name = (f"{check['tool']} watch" if check else f"{listen} at the inlet")
     return {"name": name, "check": check, "listen": listen, "pick": pick, "when": when,
-            "every": every.strip() if check else ""}
+            "every": every.strip() if check else "", "wake": wake, "renew": renew}
 
 
 def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=None,
-           when=None, every: str = "", then: str = "", owner: str = LOCAL_OWNER,
+           when=None, every: str = "", wake: str = "", renew=None, then: str = "",
+           owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None) -> Watch:
     parts = checked(name=name, check=check, listen=listen, pick=pick, when=when,
-                    every=every)
+                    every=every, wake=wake, renew=renew)
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
     if runner == "dvara":
+        if not agent:
+            raise WatchError("the Dvara road names the agent that looks and works: "
+                             "--agent NAME, from Dvara's roster")
         if dvara is None:
             raise WatchError("the Dvara road needs PRAHARI_DVARA_URL and "
                              "PRAHARI_DVARA_TOKEN")
@@ -130,6 +161,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
         watch.looked = True
     else:
         watch.next_at = iso(now_utc())      # the first look, soon: it learns
+    if parts["renew"]:
+        watch.renew_at = iso(now_utc())     # the sender is asked to start knocking
     return store.add(watch)
 
 
@@ -142,7 +175,7 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     """
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "check", "pick", "when", "every", "then", "allow_tools",
-               "max_per_day"}
+               "max_per_day", "wake", "renew"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
@@ -153,8 +186,11 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         name=given.get("name", watch.name),
         check=given.get("check", watch.check) if not watch.listen else None,
         listen=watch.listen, pick=given.get("pick", watch.pick),
-        when=given.get("when", watch.when), every=given.get("every", watch.every))
-    fields: dict = {"name": parts["name"]}
+        when=given.get("when", watch.when), every=given.get("every", watch.every),
+        wake=given.get("wake", watch.wake), renew=given.get("renew", watch.renew))
+    fields: dict = {"name": parts["name"], "wake": parts["wake"], "renew": parts["renew"]}
+    if "renew" in given:
+        fields["renew_at"] = iso(now_utc()) if parts["renew"] else None
     if recipe_keys & set(given):
         fields.update(check=parts["check"], pick=parts["pick"], when=parts["when"],
                       every=parts["every"], armed=True, last_value="", trouble=0,
@@ -225,7 +261,18 @@ def find(store: Store, watch_id: str, owner: str | None = None) -> Watch:
 
 
 def sentence(watch: Watch) -> str:
-    return recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every)
+    said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every)
+    return said + push_words(watch.wake, watch.renew)
+
+
+def push_words(wake: str, renew: dict | None) -> str:
+    """What a knock does to a watch that looks, in words."""
+    if not wake:
+        return ""
+    said = f"; and at once whenever {wake} knocks at the inlet"
+    if renew:
+        said += f" (kept knocking by {renew.get('tool', '?')}, once a day)"
+    return said
 
 
 def card(watch: Watch, store: Store | None = None) -> dict:
@@ -248,7 +295,8 @@ RESULT_SHOWN = 1500
 
 
 def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
-            every: str = "", sample=None, agent: str = "") -> dict:
+            every: str = "", sample=None, agent: str = "", runner: str = "direct",
+            owner: str = LOCAL_OWNER, wake: str = "", renew=None) -> dict:
     """Try a recipe ONCE, before anybody said yes: look (only with a tool
     that reads -- nothing is granted yet), pick, and say what it saw.
 
@@ -259,9 +307,11 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
     the one the sender will send."""
     import json as _json
 
-    parts = checked(check=check, listen=listen, pick=pick, when=when, every=every)
+    parts = checked(check=check, listen=listen, pick=pick, when=when, every=every,
+                    wake=wake, renew=renew)
     out: dict = {"sentence": recipe.sentence(parts["check"], parts["listen"],
-                                             parts["pick"], parts["when"], parts["every"]),
+                                             parts["pick"], parts["when"], parts["every"])
+                 + push_words(parts["wake"], parts["renew"]),
                  "looked": False}
     if parts["listen"]:
         if sample is None:
@@ -271,7 +321,8 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
         text = _json.dumps(sample if isinstance(sample, dict) else {"text": str(sample)},
                            sort_keys=True, ensure_ascii=False)
     else:
-        probe = Watch(id="", owner="", name="", check=parts["check"], agent=agent)
+        probe = Watch(id="", owner=owner, name="", check=parts["check"], agent=agent,
+                      runner=runner)
         called = caller.call(probe, granted=False)
         if not called.ok:
             out["said"] = (f"The look didn't work: {called.detail}"

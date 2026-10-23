@@ -107,7 +107,8 @@ class TestTheApi:
         server, store, _ = served
         listener(store)
         status, said = call(server, "GET", "/api/inlet")
-        assert said == {"url": server.url + "inlet/", "key": KEY, "words": ["whatsapp"]}
+        assert said == {"url": server.url + "inlet/", "public_url": None, "key": KEY,
+                        "words": ["whatsapp"], "people": []}
 
 
 class TestTheInlet:

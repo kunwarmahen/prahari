@@ -9,9 +9,10 @@
     PATCH  /api/watches/ID   {check, pick, when, every, then, name, ...}
     POST   /api/watches/ID/pause | /resume | /look   (look answers 202 at once)
     DELETE /api/watches/ID
-    GET    /api/inlet                      the inlet's address and key, for a sender
+    GET    /api/inlet                      the inlet's addresses and key, for a sender
+    GET    /api/mailboxes                  the mail folders kept open (no passwords)
 
-    POST   /inlet/WORD                     something to hear (the inlet's key);
+    POST   /inlet/WORD                     something to hear (an inlet key);
                                           202 at once, with how many watches heard
 
 A TOKEN, ALWAYS, as Samay's page has: any web page you visit can send a
@@ -28,21 +29,43 @@ listening for that word, as text from outside, and fires only what the
 person already set up. The key may come as ``Authorization: Bearer``
 or, for a sender that can't set headers, ``?key=``.
 
+EACH PERSON HAS A KEY, AND A KNOCK REACHES ONLY THEIRS. The key kept in
+the state folder is this computer's person's; anyone else in the house
+gets one of their own (``prahari inlet --for NAME``, or their agent's
+``inlet_address``). A knock is heard by the watches of the person whose
+key it came with, so one person's phone saying "Mum: dinner at 8" never
+fires another person's watch for "Mum".
+
 WHAT CAN BE SENT. A JSON object is read as it is; a form is made one;
 anything else is ``{"text": ...}``. 16 KB at most: an event is a line
-from a notification, not a file.
+from a notification, not a file. A Google Cloud Pub/Sub push (Gmail's
+push comes this way) is unwrapped: its base64 ``data`` is read as the
+event, and its message id is the event's ``id``.
+
+A LIMIT ON KNOCKS. At most ``KNOCKS_PER_MINUTE`` a minute for one key,
+then 429: a sender stuck in a loop, or a key that leaked, must not be
+able to start a look every second.
+
+THE PUBLIC ROAD IS THE INLET ALONE. ``prahari serve --inlet-port`` opens
+a second listener that answers ``POST /inlet/WORD`` and nothing else --
+no page, no API -- so the one address put on the internet (Tailscale
+Funnel, for a webhook or Gmail's push) cannot reach anything that reads.
 
 Standard library only, like the rest of Prahari.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
 import json
 import os
 import re
 import secrets
 import threading
+import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
@@ -56,6 +79,8 @@ from prahari.store import Store
 MAX_BODY = 64 * 1024
 MAX_EVENT = 16 * 1024
 DEFAULT_PORT = 8782
+#: Knocks one key may make in a minute before it hears 429.
+KNOCKS_PER_MINUTE = 60
 _WORD = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 
@@ -101,13 +126,44 @@ class Api:
     """What each endpoint does, apart from HTTP."""
 
     def __init__(self, store: Store, clock: Clock, state: Path, dvara=None,
-                 inlet_url: str = "", inlet_key: str = "") -> None:
+                 inlet_url: str = "", inlet_key: str = "",
+                 inlet_public: str = "") -> None:
         self.store = store
         self.clock = clock
         self.state = state
         self.dvara = dvara
         self.inlet_url = inlet_url
         self.inlet_key = inlet_key
+        #: Where the inlet is reached from outside the house, when it is.
+        self.inlet_public = inlet_public
+        self._knocks: dict[str, deque] = {}
+        self._knock_lock = threading.Lock()
+
+    def owners_of(self, key: str) -> set[str] | None:
+        """Whose watches a knock with this key reaches: this computer's
+        person's for the kept key, one person's for their own, None for no
+        key at all."""
+        if not key:
+            return None
+        found = None
+        if self.inlet_key and hmac.compare_digest(key.encode(), self.inlet_key.encode()):
+            found = set(self.clock.home) or {watches.LOCAL_OWNER}
+        for owner, theirs in self.store.inlet_keys().items():
+            if hmac.compare_digest(key.encode(), theirs.encode()):
+                found = {owner}
+        return found
+
+    def may_knock(self, key: str, now: float | None = None) -> bool:
+        """Under the limit for this key, counting this knock."""
+        now = time.monotonic() if now is None else now
+        with self._knock_lock:
+            seen = self._knocks.setdefault(hashlib_key(key), deque())
+            while seen and now - seen[0] > 60:
+                seen.popleft()
+            if len(seen) >= KNOCKS_PER_MINUTE:
+                return False
+            seen.append(now)
+            return True
 
     def handle(self, method: str, path: str, query: dict, body: dict) -> tuple[int, dict]:
         parts = [p for p in path.split("/") if p][1:]
@@ -121,16 +177,21 @@ class Api:
         if parts == ["status"] and method == "GET":
             return 200, report(self.state, self.store)
         if parts == ["inlet"] and method == "GET":
-            return 200, {"url": self.inlet_url, "key": self.inlet_key,
-                         "words": sorted({w.listen for w in self.store.watches()
-                                          if w.listen})}
+            return 200, {"url": self.inlet_url, "public_url": self.inlet_public or None,
+                         "key": self.inlet_key,
+                         "words": sorted({w.listen or w.wake for w in self.store.watches()
+                                          if w.listen or w.wake}),
+                         "people": sorted(self.store.inlet_keys())}
+        if parts == ["mailboxes"] and method == "GET":
+            return 200, {"mailboxes": [b.as_dict() for b in self.store.mailboxes()]}
         if parts == ["preview"] and method == "POST":
             return 200, watches.preview(
                 self.clock.caller, check=body.get("check"), listen=str(body.get("listen")
                                                                         or ""),
                 pick=body.get("pick"), when=body.get("when"),
                 every=str(body.get("every") or ""), sample=body.get("sample"),
-                agent=str(body.get("agent") or ""))
+                agent=str(body.get("agent") or ""), wake=str(body.get("wake") or ""),
+                renew=body.get("renew"))
         if parts == ["looks"] and method == "GET":
             limit = _int(query.get("limit", ["50"])[0], "limit")
             watch_id = query.get("watch", [None])[0]
@@ -176,6 +237,7 @@ class Api:
             self.store, name=str(body.get("name") or ""), check=body.get("check"),
             listen=str(body.get("listen") or ""), pick=body.get("pick"),
             when=body.get("when"), every=str(body.get("every") or ""),
+            wake=str(body.get("wake") or ""), renew=body.get("renew"),
             then=str(body.get("then") or ""), owner=str(body.get("as")
                                                         or watches.LOCAL_OWNER),
             runner=runner, agent=str(body.get("agent") or ""), allow_tools=allow,
@@ -183,13 +245,20 @@ class Api:
                              "max_per_day"),
             created_via="page", dvara=self.dvara if runner == "dvara" else None)
 
-    def event(self, word: str, raw: bytes, kind: str) -> tuple[int, dict]:
-        """Something sent to the inlet."""
+    def event(self, word: str, raw: bytes, kind: str,
+              owners: set[str] | None = None) -> tuple[int, dict]:
+        """Something sent to the inlet, for ``owners``' watches."""
         if not _WORD.match(word):
             raise ApiError(404, "the inlet's address ends in one lowercase word, "
                                 "like /inlet/whatsapp")
-        heard = self.clock.hear(word, _event_body(raw, kind))
+        heard = self.clock.hear(word, _event_body(raw, kind), owners)
         return 202, {"heard_by": heard}
+
+
+def hashlib_key(key: str) -> str:
+    """A key as the limit counts it: never kept as itself."""
+    import hashlib
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def _event_body(raw: bytes, kind: str) -> dict:
@@ -199,10 +268,33 @@ def _event_body(raw: bytes, kind: str) -> dict:
             data = json.loads(text or "{}")
         except json.JSONDecodeError:
             return {"text": text}
-        return data if isinstance(data, dict) else {"text": text}
+        if not isinstance(data, dict):
+            return {"text": text}
+        return _unwrapped(data)
     if "form" in kind:
         return {k: v[-1] for k, v in parse_qs(text).items()}
     return {"text": text}
+
+
+def _unwrapped(data: dict) -> dict:
+    """A Pub/Sub push's envelope taken off: ``message.data`` (base64) is
+    the event, ``message.messageId`` its id. Anything else, as it came."""
+    message = data.get("message")
+    if not (isinstance(message, dict) and "subscription" in data
+            and isinstance(message.get("data"), str)):
+        return data
+    try:
+        inner = base64.b64decode(message["data"], validate=False).decode("utf-8", "replace")
+    except (binascii.Error, ValueError):
+        return data
+    try:
+        event = json.loads(inner)
+    except json.JSONDecodeError:
+        event = None
+    event = event if isinstance(event, dict) else {"text": inner}
+    if message.get("messageId") and "id" not in event:
+        event["id"] = str(message["messageId"])
+    return event
 
 
 def _int(value, name: str) -> int:
@@ -212,8 +304,8 @@ def _int(value, name: str) -> int:
         raise ApiError(400, f"{name} must be a whole number") from None
 
 
-def public_address(raw: str | None) -> str | None:
-    raw = (raw if raw is not None else os.environ.get("PRAHARI_PUBLIC_URL", "")).strip()
+def public_address(raw: str | None, env: str = "PRAHARI_PUBLIC_URL") -> str | None:
+    raw = (raw if raw is not None else os.environ.get(env, "")).strip()
     if not raw:
         return None
     parsed = urlparse(raw)
@@ -221,6 +313,13 @@ def public_address(raw: str | None) -> str | None:
         raise ValueError(f"the page's public address must look like http://host:port/ "
                          f"-- got {raw!r}")
     return raw.rstrip("/") + "/"
+
+
+def public_inlet() -> str:
+    """Where the internet reaches the inlet (``$PRAHARI_INLET_PUBLIC_URL``),
+    ending in /, or ""."""
+    raw = os.environ.get("PRAHARI_INLET_PUBLIC_URL", "").strip()
+    return raw.rstrip("/") + "/" if raw else ""
 
 
 def page() -> bytes:
@@ -232,19 +331,26 @@ def favicon() -> bytes:
 
 
 class PrahariServer:
-    """The API, the page and the inlet, on a thread beside the watch."""
+    """The API, the page and the inlet, on a thread beside the watch --
+    or, ``inlet_only``, the inlet and nothing else (the public road)."""
 
     def __init__(self, api: Api, token: str, inlet_key: str, *, host: str = "127.0.0.1",
-                 port: int = DEFAULT_PORT, public_url: str | None = None) -> None:
+                 port: int = DEFAULT_PORT, public_url: str | None = None,
+                 inlet_only: bool = False) -> None:
         self.api = api
         self.token = token
         self.inlet_key = inlet_key
-        self.public_url = public_address(public_url)
+        self.inlet_only = inlet_only
+        self.public_url = (public_address(public_url, "PRAHARI_INLET_PUBLIC_URL")
+                           if inlet_only else public_address(public_url))
         self.httpd = ThreadingHTTPServer((host, port), _handler(self))
         self.httpd.daemon_threads = True
         self._thread: threading.Thread | None = None
-        api.inlet_url = self.url + "inlet/"
-        api.inlet_key = inlet_key
+        if inlet_only:
+            api.inlet_public = self.url + "inlet/" if self.public_url else ""
+        else:
+            api.inlet_url = self.url + "inlet/"
+            api.inlet_key = inlet_key
 
     @property
     def url(self) -> str:
@@ -299,6 +405,10 @@ def _handler(server: PrahariServer):
 
         def _dispatch(self, method: str) -> None:
             url = urlparse(self.path)
+            if server.inlet_only:
+                if url.path.startswith("/inlet/"):
+                    return self._inlet(method, url)
+                return self._json(404, {"detail": "not found"})
             if method == "GET" and url.path in ("/", "/index.html"):
                 return self._send(200, page(), "text/html; charset=utf-8")
             if method == "GET" and url.path == "/favicon.svg":
@@ -334,8 +444,12 @@ def _handler(server: PrahariServer):
             if method != "POST":
                 return self._json(405, {"detail": "the inlet hears POST only"})
             key = self._bearer() or (parse_qs(url.query).get("key") or [""])[0]
-            if not self._same(key, server.inlet_key):
+            owners = server.api.owners_of(key)
+            if owners is None:
                 return self._json(401, {"detail": "missing or wrong inlet key"})
+            if not server.api.may_knock(key):
+                return self._json(429, {"detail": f"too many knocks: "
+                                                  f"{KNOCKS_PER_MINUTE} a minute at most"})
             size = int(self.headers.get("Content-Length") or 0)
             if size > MAX_EVENT:
                 return self._json(413, {"detail": "an event is 16 KB at most"})
@@ -343,7 +457,7 @@ def _handler(server: PrahariServer):
             word = url.path[len("/inlet/"):].strip("/")
             try:
                 status, data = server.api.event(
-                    word, raw, self.headers.get("Content-Type", "").lower())
+                    word, raw, self.headers.get("Content-Type", "").lower(), owners)
             except ApiError as exc:
                 return self._json(exc.status, {"detail": exc.detail})
             except Exception as exc:

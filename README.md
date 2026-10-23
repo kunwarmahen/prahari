@@ -55,7 +55,8 @@ and when a watch fires, the work is an ordinary Yantra turn. Prahari
 starts Yantra as a program and reads the JSON it prints. It imports
 nothing from Yantra and has no dependencies of its own.
 
-How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no-model.md).
+How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no-model.md);
+[02 — a watch for everyone, mail that knocks, and a door to the street](notes/02-a-watch-for-everyone.md).
 
 ## Works with
 
@@ -66,8 +67,9 @@ How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no
   that says in words what it looks at, how often, and what happens then.
 * **[dvara](https://github.com/kunwarmahen/dvara)** carries the news to you: answers go to your
   Telegram, Dvara's web chat and Sarathi's home page through Dvara's
-  `/notify`. With `dvara --prahari`, the owner's agent can make a watch
-  from the chat.
+  `/notify`. With `dvara --prahari`, everyone in the house can make a
+  watch from the chat, and each one looks as its person, with their own
+  accounts (Dvara's `POST /call`).
 * **[Setu](https://github.com/kunwarmahen/setu)** is reached through Yantra: a look can use any
   account Setu keeps (a Gmail search, a signed-in site's page, Notion),
   exactly as a turn would.
@@ -115,6 +117,16 @@ prahari add "BTC under 60k" --check web_fetch \
 prahari serve
 #   page: http://127.0.0.1:8782/#token=…     open this once; the browser keeps it
 #   inlet: http://127.0.0.1:8782/inlet/WORD  (key: prahari inlet)
+
+# mail the moment it lands: a mail folder kept open (IMAP IDLE)
+prahari mailbox add work-mail --server imap.fastmail.com --user me@example.com
+#   password for me@example.com on imap.fastmail.com (an app password, for most services):
+#   opened INBOX on imap.fastmail.com as me@example.com; kept as work-mail for local
+prahari add "The bank wrote" --listen work-mail --pick json:from --when 'contains bank'
+# ...or keep a Gmail search as the check, and look at once when mail lands
+prahari add "Mail from the bank" --check mcp__gmail__search_threads \
+    --args '{"account": "personal", "query": "from:alerts@bank.example newer_than:2d"}' \
+    --pick 'items:thread (\w+)' --when new --every 6h --wake work-mail
 
 # see, try, mend, stop
 prahari list
@@ -184,6 +196,17 @@ that reads.
 **every** — `30m`, `3h`, `1d`: five minutes at the least, seven days at
 the most (less often than that is a schedule, and Samay's job).
 
+**wake** — a word at the inlet that makes a watch that looks look *now*,
+not only every `every`: a mailbox's name, or the word Gmail's push
+knocks on. The knock only says "look"; its body isn't read, so a sender
+can't put words into the watch. A knock while it's looking makes one
+more look after, never a pile.
+
+**renew** — with `wake`, a call that keeps the sender knocking, made when
+the watch starts and once a day: Gmail's push lasts seven days. It runs
+on the watch's own road, granted word for word like the check; one that
+fails is `failed`, and is tried again in an hour.
+
 **then** — what the agent is asked when it fires, with nobody watching.
 Leave it out, and you get a line saying what was seen, with no model
 asked at all.
@@ -234,6 +257,13 @@ That's all: the phone tells Prahari, the watch decides, and the agent
 answers in your chat. No polling, nothing unofficial logged in to
 WhatsApp, and nothing read from your phone that you didn't send.
 
+**Each person has their own key.** The key above is this computer's
+person's. Anyone else in the house gets one of their own
+(`prahari inlet --for asha`, or their agent's `inlet_address` tool), and
+a knock is heard only by the watches of the person whose key it came
+with: Asha's phone saying "Mum: dinner at 8?" never fires your watch for
+Mum. `--new-key` replaces one that leaked.
+
 **The inlet's key can only knock.** It goes into apps and webhook
 settings, where keys leak, so it isn't the page's token: with it,
 something can be *said* to Prahari, and nothing can be read, made,
@@ -246,8 +276,82 @@ one event (an `id` in the body, if the sender has one, is better). A
 JSON object is read as it is, a form is made one, and anything else is
 `{"text": ...}`; 16 KB at most.
 
-`prahari hear WORD JSON` sends the inlet something on this computer
-without the network, to try a watch before you set up the phone.
+`prahari hear WORD JSON [--for NAME]` sends the inlet something on this
+computer without the network, to try a watch before you set up the
+phone. A Google Cloud Pub/Sub push is read through its envelope: its
+base64 `data` is the event, and its message id the event's `id`.
+
+At most 60 knocks a minute for one key; the 61st hears `429`.
+
+### Mail, the moment it lands
+
+A watch on mail looks every 15–30 minutes. Two things can say so the
+moment a mail lands, and both knock on the inlet, as their person:
+
+**A mailbox Prahari keeps open (IMAP IDLE)**, any mail server: Gmail,
+Fastmail, iCloud, Outlook, your own.
+
+```bash
+prahari mailbox add work-mail --server imap.gmail.com --user me@gmail.com [--for asha]
+prahari mailbox list
+#   work-mail    local      me@gmail.com on imap.gmail.com INBOX  [listening]
+#                listening to INBOX since 08:14 (Thu 22 Oct 08:14)
+prahari mailbox rm work-mail
+```
+
+It asks for the password: for Gmail, iCloud and Outlook an *app
+password* (your account's security settings make one), never your own.
+It's kept in `~/.prahari/mailboxes.secret.json`, readable by you alone,
+and sent nowhere but the mail server, over TLS. While `prahari serve`
+runs, each new mail knocks on the mailbox's name with its `from`, `to`,
+`subject`, `date` and `id`, never a word of what it says, and nothing
+is marked read. The first connection only learns what's there. Mail
+that came while it was down knocks when it's back, once each.
+
+**Gmail's own push**, through Google Cloud Pub/Sub. This one needs the
+public inlet (below), because Pub/Sub delivers by calling an address:
+
+```bash
+# in the Google Cloud project whose client Setu signs in to Gmail with
+gcloud services enable pubsub.googleapis.com
+gcloud pubsub topics create gmail-push
+gcloud pubsub topics add-iam-policy-binding gmail-push \
+    --member=serviceAccount:gmail-api-push@system.gserviceaccount.com \
+    --role=roles/pubsub.publisher
+gcloud pubsub subscriptions create prahari-gmail --topic=gmail-push \
+    --push-endpoint="https://<your computer>.<tailnet>.ts.net:8443/inlet/gmail?key=<your inlet key>"
+
+# the watch: its check, woken by Gmail, and the call that keeps Gmail telling
+prahari add "Mail from the bank" --check mcp__gmail__search_threads \
+    --args '{"account": "personal", "query": "from:alerts@bank.example newer_than:2d"}' \
+    --pick 'items:thread (\w+)' --when new --every 6h --wake gmail \
+    --renew mcp__gmail__watch_mailbox \
+    --renew-args '{"account": "personal", "topic": "projects/<project>/topics/gmail-push"}'
+```
+
+Gmail tells the topic only your address and a number, never mail text;
+the knock wakes the watch, and its own search says what's new.
+`watch_mailbox` is Setu's, on every Gmail level.
+
+### The inlet from outside the house
+
+The inlet is on the house's network. A webhook from the internet (Gmail's
+push, a price tracker, IFTTT) needs it reachable from outside, and
+nothing else should be:
+
+```bash
+prahari serve --inlet-port 8783 --inlet-public-url https://<computer>.<tailnet>.ts.net:8443
+#   inlet alone: https://<computer>.<tailnet>.ts.net:8443/inlet/WORD
+deploy/public-inlet-tailscale.sh 8783      # you run it: it signs in to Tailscale
+```
+
+`--inlet-port` opens a second listener with **the inlet alone**: `POST
+/inlet/WORD` with a key, and 404 for the page and every `/api` path,
+whatever token is offered. It listens on 127.0.0.1, and Tailscale Funnel
+carries a public HTTPS name to it: no domain, no open router port, and
+Tailscale holds the certificate. The script serves it on 8443, so a Setu
+catalog on 443 keeps its own. Undo with `sudo tailscale funnel
+--https=8443 off`. `prahari inlet` and the page show both addresses.
 
 **What the inlet can't do.** An iPhone doesn't let other apps read its
 notifications, so there's no WhatsApp road there. And Prahari doesn't
@@ -282,8 +386,9 @@ PATCH  /api/watches/ID   {check, pick, when, every, then, name, max_per_day}
 POST   /api/watches/ID/pause | /resume | /look     (look answers 202 at once)
 DELETE /api/watches/ID
 GET    /api/looks?watch=ID&limit=N       newest first
-GET    /api/inlet                        the inlet's address, key and words
-POST   /inlet/WORD                       the inlet (its own key)
+GET    /api/inlet                        the inlet's addresses, key, words, people with keys
+GET    /api/mailboxes                    the mail folders kept open (no passwords)
+POST   /inlet/WORD                       the inlet (an inlet key; also on --inlet-port alone)
 ```
 
 ### Your agent writes the recipe
@@ -300,12 +405,13 @@ prahari mcp --for local --agent ~/agents/reader     # what a harness starts
 |---|---|
 | `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
+| `inlet_address` | where this person's phone or webhook sends, with their own key |
 | `create_watch` | saves one, after the person agreed |
 | `update_watch` | mends one: a site moved its price, so the pick needs changing |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 
-**The agent writes the recipe; you accept it.** The three reading tools
+**The agent writes the recipe; you accept it.** The four reading tools
 say they only read, and the six that change something don't, so Yantra
 asks you before each one, on a card in words. `preview_watch` comes
 first and answers with the start of what the tool said, so a model whose
@@ -332,6 +438,9 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A limit per day** | at most `max_per_day` fires (10 unless you say) in any 24 hours; past it, kept and not run, and you're told once |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
+| **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |
+| **A knock is its person's** | a knock is heard only by the watches of the person whose key (or mailbox) it came from |
+| **A knock only says look** | a watch woken by its word looks with its own check; the knock's body is never read |
 
 ### Where news goes
 
@@ -344,12 +453,11 @@ looks are kept for `prahari looks` and the page, and nothing is sent.
 A then-turn runs here (`--runner direct`, the default: Yantra as a
 program, its questions put to you in your chat when a Dvara is set) or
 through Dvara as a person (`--runner dvara --as NAME`: their allowance,
-their rules, `came_by: prahari` on Dvara's page). On the Dvara road a
-watch's agent is a name on Dvara's roster, which a look can't open, so
-the look is made with plain Yantra and this computer's accounts, and
-Dvara runs the named agent when it fires. That is why Dvara offers
-watches to one person, named (`--prahari-for`, Dvara's notes/55): a
-look reads this computer's accounts, which are that person's.
+their rules, `came_by: prahari` on Dvara's page). On the Dvara road the
+look goes there too: `POST /call` builds the person's agent with their
+own Setu folder and runs the one call with no model (Dvara's notes/56).
+So a guest's watch reads the guest's mail, never yours, and Dvara can
+offer watches to everyone.
 
 ## Settings
 
@@ -364,8 +472,11 @@ look reads this computer's accounts, which are that person's.
 | `PRAHARI_TOKEN` | the page's token, instead of the one kept in the state folder |
 | `PRAHARI_INLET_TOKEN` | the inlet's key, instead of the one kept in the state folder |
 | `PRAHARI_PUBLIC_URL` | where a browser reaches the page when that isn't where it is bound (a container's port mapping) |
+| `PRAHARI_INLET_PORT` | the inlet alone on this port, for the public road (also `--inlet-port`) |
+| `PRAHARI_INLET_PUBLIC_URL` | where the internet reaches that inlet: its Tailscale Funnel name (also `--inlet-public-url`) |
 
-Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`. Each
+Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`, except
+mailbox passwords, which are in `~/.prahari/mailboxes.secret.json`. Each
 watch's looks work in a folder of their own, `~/.prahari/work/<id>`.
 
 ### Keeping it running
@@ -388,7 +499,7 @@ src/prahari/
 │                (below, contains, changed, new, any, ask), checked with
 │                the known keys named, and applied to a tool's answer
 ├── store.py     the SQLite file: watches (the promise), looks (the receipt),
-│                seen (keys already told)
+│                seen (keys already told), each person's inlet key, mailboxes
 ├── watches.py   make, mend, pause, find, a cap per person; preview, which
 │                looks once with nothing granted
 ├── clock.py     the rules above; the loop prahari serve runs; the inlet's
@@ -396,12 +507,19 @@ src/prahari/
 │                marked as outside text
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
 │                for word), the yes/no for ask, the then-turn (Samay's
-│                direct road)
-├── dvara.py     the Dvara road: /notify for news, /message for a turn as
-│                the person (came_by prahari). Standard library only
+│                direct road); Roads, each watch's look on its own road
+├── dvara.py     the Dvara road: /call for a look as the person, /notify for
+│                news, /message for a turn as the person (came_by prahari).
+│                Standard library only ([notes/02](notes/02-a-watch-for-everyone.md))
+├── mailbox.py   mail pushed: a folder kept open with IMAP IDLE, each new
+│                mail's headers a knock as its person; passwords kept apart
 ├── http.py      the page, its JSON API (the page's token), and the inlet
-│                (a key of its own that can only knock)
+│                (keys of their own, one a person, that can only knock; a
+│                Pub/Sub push unwrapped; 60 knocks a minute); the inlet
+│                alone on a port of its own, for the public road
 ├── static/      the page: one file and its icon, nothing fetched
+deploy/
+└── public-inlet-tailscale.sh   the inlet alone on a public HTTPS name (Funnel)
 ├── mcp.py       the agent's tools, for one person (stdio MCP, by hand)
 ├── status.py    prahari status --json: here, watching (a lock, not a pid)
 ├── unit.py      prahari unit: a systemd user unit
@@ -410,25 +528,20 @@ src/prahari/
 
 ## Status
 
-The watch, its rules, the inlet, the page and the agent's tools work,
-and are covered by 107 tests. The API is not stable.
+The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
+inlet alone for the public road, the page and the agent's tools work,
+and are covered by 147 tests. The API is not stable.
 
-Not here yet:
-
-* **Watches for other people in the house.** A look runs this computer's
-  Yantra, with the owner's accounts; another person's watch would need
-  their own (a look through Dvara as that person). For now, Dvara offers
-  the tools to its owner only.
-* **Mail pushed, not polled.** IMAP IDLE (any mail server) and Gmail's
-  push through a Pub/Sub pull subscription would tell Prahari about a
-  mail within seconds, with no public address. A look every 15–30
-  minutes is the road for now; the push roads would sit behind the same
-  check.
+Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
+topic and the public name), IMAP IDLE against a real mail server (a
+local test server stands in, [notes/02](notes/02-a-watch-for-everyone.md)),
+and the Funnel script.
 
 ## Tests
 
 ```bash
 uv run pytest -q          # offline: a fake caller, a fake runner, a fake
                           #   yantra on a real process, the page and the inlet
-                          #   on local sockets, and prahari mcp as a real process
+                          #   on local sockets, prahari mcp as a real process,
+                          #   a small mail server for IDLE, and a fake Dvara
 ```

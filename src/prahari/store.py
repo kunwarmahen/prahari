@@ -10,7 +10,12 @@ tables:
   it starts and once when it ends. ``fired`` says the watch woke the
   agent, and what came back;
 * ``seen`` -- the keys of items a watch has already reported, so a mail
-  is news once.
+  is news once;
+* ``inlet_key`` -- each person's own key to the inlet (http.py), so what
+  one person's phone says reaches only that person's watches;
+* ``mailbox`` -- the mail folders Prahari keeps open (mailbox.py), and
+  where each one got to. Their passwords are not here: they are in a
+  file of their own, readable by you alone.
 
 A LOOK THAT FOUND NOTHING IS A ROW TOO (``quiet``). "Is it still
 watching?" deserves an answer with a time on it, not an absence.
@@ -105,6 +110,14 @@ class Watch:
     last_value: str = ""
     #: An edged test may fire: it was false at the last look.
     armed: bool = True
+    #: A word at the inlet that makes this watch look NOW, instead of at
+    #: its next ``every`` -- mail pushed by a mailbox or by Gmail. "" for
+    #: none. The look is the same check; the knock only says "look".
+    wake: str = ""
+    #: A call that keeps the sender knocking -- Gmail's push lasts seven
+    #: days -- made when the watch starts and once a day: {"tool", "args"}.
+    renew: dict = field(default_factory=dict)
+    renew_at: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -117,7 +130,8 @@ class Look:
     started_at: str
     outcome: str = "running"
     ended_at: str | None = None
-    #: How the look came: "clock", "now" (a person asked), "inlet".
+    #: How the look came: "clock", "now" (a person asked), "inlet", "wake"
+    #: (a knock on its word), "renew" (the call keeping a push alive).
     came_by: str = "clock"
     #: The picked value, in a few words.
     value: str = ""
@@ -135,8 +149,8 @@ class Look:
         return asdict(self)
 
 
-_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found"}
-_BOOL_COLUMNS = {"looked", "armed", "notified"}
+_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew"}
+_BOOL_COLUMNS = {"looked", "armed", "notified", "tls"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS watch (
@@ -163,7 +177,10 @@ CREATE TABLE IF NOT EXISTS watch (
     trouble INTEGER NOT NULL,
     looked INTEGER NOT NULL,
     last_value TEXT NOT NULL,
-    armed INTEGER NOT NULL
+    armed INTEGER NOT NULL,
+    wake TEXT NOT NULL DEFAULT '',
+    renew TEXT NOT NULL DEFAULT '{}',
+    renew_at TEXT
 );
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
@@ -188,7 +205,33 @@ CREATE TABLE IF NOT EXISTS seen (
     at TEXT NOT NULL,
     PRIMARY KEY (watch, key)
 );
+CREATE TABLE IF NOT EXISTS inlet_key (
+    owner TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    made_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mailbox (
+    name TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    server TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    user TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    tls INTEGER NOT NULL,
+    made_at TEXT NOT NULL,
+    uidvalidity INTEGER,
+    last_uid INTEGER,
+    state TEXT NOT NULL,
+    said TEXT NOT NULL,
+    said_at TEXT,
+    PRIMARY KEY (owner, name)
+);
 """
+
+#: Columns a file made before them lacks, added on open: (name, SQL type).
+_ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
+                    ("renew", "TEXT NOT NULL DEFAULT '{}'"),
+                    ("renew_at", "TEXT"))}
 
 
 class Store:
@@ -199,6 +242,11 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             db.executescript(_SCHEMA)
+            for table, added in _ADDED.items():
+                have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+                for name, kind in added:
+                    if name not in have:
+                        db.execute(f'ALTER TABLE {table} ADD COLUMN "{name}" {kind}')
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
@@ -229,9 +277,10 @@ class Store:
         return _load(Watch, row) if row else None
 
     def watches(self, owner: str | None = None, state: str | None = None,
-                listen: str | None = None) -> list[Watch]:
+                listen: str | None = None, wake: str | None = None) -> list[Watch]:
         query, where, args = "SELECT * FROM watch", [], []
-        for column, value in (("owner", owner), ("state", state), ("listen", listen)):
+        for column, value in (("owner", owner), ("state", state), ("listen", listen),
+                              ("wake", wake)):
             if value is not None:
                 where.append(f"{column} = ?")
                 args.append(value)
@@ -340,6 +389,63 @@ class Store:
     def forget_seen(self, watch_id: str) -> None:
         with self._db() as db:
             db.execute("DELETE FROM seen WHERE watch = ?", (watch_id,))
+
+    # -- each person's inlet key ---------------------------------------------
+
+    def inlet_key(self, owner: str) -> str:
+        """This person's key to the inlet, made the first time it is asked for."""
+        with self._db() as db:
+            row = db.execute("SELECT key FROM inlet_key WHERE owner = ?",
+                             (owner,)).fetchone()
+            if row:
+                return row[0]
+            key = secrets.token_urlsafe(24)
+            db.execute("INSERT INTO inlet_key (owner, key, made_at) VALUES (?, ?, ?)",
+                       (owner, key, iso(now_utc())))
+            return key
+
+    def inlet_keys(self) -> dict[str, str]:
+        """Every person's key, by person."""
+        with self._db() as db:
+            return {r[0]: r[1] for r in db.execute("SELECT owner, key FROM inlet_key")}
+
+    def new_inlet_key(self, owner: str) -> str:
+        """A fresh key for this person; the old one stops opening the inlet."""
+        with self._db() as db:
+            db.execute("DELETE FROM inlet_key WHERE owner = ?", (owner,))
+        return self.inlet_key(owner)
+
+    # -- mailboxes -----------------------------------------------------------
+
+    def put_mailbox(self, box) -> None:
+        self._put("mailbox", box)
+
+    def mailboxes(self, owner: str | None = None):
+        from prahari.mailbox import Mailbox
+
+        query, args = "SELECT * FROM mailbox", []
+        if owner is not None:
+            query, args = query + " WHERE owner = ?", [owner]
+        with self._db() as db:
+            rows = db.execute(query + " ORDER BY owner, name", args).fetchall()
+        return [_load(Mailbox, r) for r in rows]
+
+    def mailbox(self, owner: str, name: str):
+        found = [b for b in self.mailboxes(owner) if b.name == name]
+        return found[0] if found else None
+
+    def update_mailbox(self, owner: str, name: str, **changes) -> None:
+        if not changes:
+            return
+        cols = ", ".join(f'"{k}" = ?' for k in changes)
+        with self._db() as db:
+            db.execute(f"UPDATE mailbox SET {cols} WHERE owner = ? AND name = ?",
+                       [*(_dump(k, v) for k, v in changes.items()), owner, name])
+
+    def delete_mailbox(self, owner: str, name: str) -> bool:
+        with self._db() as db:
+            return bool(db.execute("DELETE FROM mailbox WHERE owner = ? AND name = ?",
+                                   (owner, name)).rowcount)
 
     # -- plumbing ----------------------------------------------------------
 

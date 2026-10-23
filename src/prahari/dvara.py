@@ -9,7 +9,11 @@ Dvara. So, as for Samay:
 * ``POST /message`` runs the then-turn as that person, unattended:
   their daily allowance pays, the owner's rules apply, and a question
   that can reach them still does, with two buttons. The turn is named
-  as Prahari's (``came_by``), so Dvara's page labels it.
+  as Prahari's (``came_by``), so Dvara's page labels it;
+* ``POST /call`` makes the LOOK as that person: one tool, no model, their
+  agent built with their own Setu folder (Dvara's notes/56). A watch made
+  by somebody else in the house reads their mail, never the owner's --
+  which is what lets Dvara offer watches to everyone.
 
 A FRESH CONVERSATION EVERY FIRE. Each then-turn is its own thread,
 ``prahari-<watch>-<time>``: what the watch found is in the prompt, and a
@@ -27,7 +31,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from prahari.looking import TurnResult
+from prahari.looking import CALL_FORMAT, LOOK_LIMIT, Called, TurnResult, grant_for
 from prahari.store import Watch
 
 #: How long a call that is not a turn may take.
@@ -92,6 +96,40 @@ class Dvara:
 
     def notify(self, actor: str, text: str) -> dict:
         return self.call("POST", "/notify", {"actor": actor, "text": text})
+
+
+class DvaraCaller:
+    """A look through Dvara, as the watch's person, with their accounts."""
+
+    def __init__(self, dvara: Dvara, limit: int = LOOK_LIMIT) -> None:
+        self.dvara = dvara
+        self.limit = limit
+
+    def call(self, watch: Watch, *, granted: bool = True) -> Called:
+        actor = self.dvara.actor_for(watch)
+        if not actor or not watch.agent:
+            return Called(ok=False, detail=(
+                "a look through Dvara names its person and its agent; this watch has "
+                + ("no agent" if actor else "nobody")))
+        tool, args = str(watch.check.get("tool") or ""), watch.check.get("args") or {}
+        grant = grant_for(tool, args) if granted else None
+        body = {"actor": actor, "agent": watch.agent, "tool": tool, "args": args,
+                "allow_tools": [grant] if grant else []}
+        try:
+            data = self.dvara.call("POST", "/call", body, timeout=self.limit)
+        except TimeoutError:
+            return Called(ok=False, detail=f"the look took longer than {self.limit}s")
+        except DvaraError as exc:
+            return Called(ok=False, detail=str(exc))
+        if data.get("format") != CALL_FORMAT:
+            return Called(ok=False, detail=(
+                f"dvara answered in a format this Prahari does not know "
+                f"({data.get('format')!r}; want {CALL_FORMAT}): it may be older than "
+                "POST /call"))
+        return Called(ok=bool(data.get("ok")), text=str(data.get("text") or ""),
+                      detail=str(data.get("detail") or ""),
+                      needs=[str(n) for n in data.get("needs_person") or []],
+                      busy=[str(b) for b in data.get("busy") or []])
 
 
 class DvaraRunner:

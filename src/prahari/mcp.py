@@ -3,11 +3,13 @@
     prahari mcp --for mahen [--agent DIR|NAME] [--runner direct|dvara]
 
 An MCP server on stdin/stdout -- newline-delimited JSON-RPC, by hand,
-like Samay's -- with nine tools:
+like Samay's -- with ten tools:
 
     preview_watch     read    try a recipe once; what it sees, in words
     list_watches      read    this person's watches
     watch_looks       read    what one of them saw lately
+    inlet_address     read    where this person's phone or webhook sends, and
+                              their own key
     create_watch      write   save one
     update_watch      write   mend one: its check, pick, test, how often, then
     pause_watch       write
@@ -15,7 +17,7 @@ like Samay's -- with nine tools:
     allow_for_watch   write   let its then-turn use a tool without asking
     delete_watch      write
 
-THE AGENT WRITES THE RECIPE; THE PERSON ACCEPTS IT. The three reads say
+THE AGENT WRITES THE RECIPE; THE PERSON ACCEPTS IT. The four reads say
 ``readOnlyHint: true`` and the rest do not, so a harness that honours the
 hint (Yantra does) puts every create and change in front of the person.
 ``preview_watch`` comes first: it LOOKS ONCE, with a tool that only
@@ -73,6 +75,15 @@ _EVERY = {"type": "string", "description": (
     'How often to look: "30m", "3h", "1d" (5 minutes at the least, 7 days at '
     "most). Match how fast the thing changes: mail 15m-1h, a price 1h-6h, a page "
     "a day.")}
+_WAKE = {"type": "string", "description": (
+    "For mail pushed to Prahari: the word at the inlet that makes this watch look AT "
+    "ONCE, as well as every `every` -- a mailbox's name (the person keeps one with "
+    "`prahari mailbox add`), or the word Gmail's push knocks on. Leave out otherwise.")}
+_RENEW = {"type": "object", "description": (
+    "With wake, for Gmail's push: the call that keeps Gmail knocking, made now and "
+    'once a day: {"tool": "mcp__gmail__watch_mailbox", "args": {"account": '
+    '"personal", "topic": "projects/<project>/topics/<name>"}}. Only when the person '
+    "has set up that topic.")}
 
 TOOLS: list[dict] = [
     {"name": "preview_watch",
@@ -87,12 +98,21 @@ TOOLS: list[dict] = [
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "listen": {"type": "string", "description": "for an inlet watch instead "
                     "of a check: the one word a sender posts to (whatsapp)"},
+         "wake": _WAKE,
          "sample": {"type": "object", "description": "an event like the sender's, "
                     "to try an inlet watch on"}}},
      "annotations": {"readOnlyHint": True}},
     {"name": "list_watches",
      "description": "The person's watches: what each looks at, when it tells them, "
                     "and how its last look went.",
+     "inputSchema": {"type": "object", "properties": {}},
+     "annotations": {"readOnlyHint": True}},
+    {"name": "inlet_address",
+     "description": (
+         "Where something that can tell Prahari itself -- the person's Android phone "
+         "(MacroDroid, Tasker), Home Assistant, a webhook -- sends, with THIS person's "
+         "own key: knocks with it reach only their watches. Give it to the person to "
+         "put in that app; the key can only knock, never read."),
      "inputSchema": {"type": "object", "properties": {}},
      "annotations": {"readOnlyHint": True}},
     {"name": "watch_looks",
@@ -115,6 +135,7 @@ TOOLS: list[dict] = [
                   "know it by: \"ALAB under $50\""},
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "listen": {"type": "string"},
+         "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
          "allow_tools": {"type": "array", "items": {"type": "string"}},
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200,
@@ -130,6 +151,7 @@ TOOLS: list[dict] = [
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "name": {"type": "string"},
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
+         "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
          "required": ["id"]},
@@ -166,8 +188,12 @@ class ToolFailed(Exception):
 
 class Tools:
     def __init__(self, store: Store, state: Path, caller, *, person: str,
-                 agent: str = "", runner: str | None = None, dvara=None) -> None:
+                 agent: str = "", runner: str | None = None, dvara=None,
+                 home: set[str] | None = None) -> None:
         self.store = store
+        #: The names this computer's own person goes by (their key is the
+        #: one kept in the state folder).
+        self.home = set(home or {watches.LOCAL_OWNER})
         self.state = state
         self.caller = caller
         self.person = person
@@ -192,8 +218,9 @@ class Tools:
                                listen=str(args.get("listen") or ""),
                                pick=args.get("pick"), when=args.get("when"),
                                every=str(args.get("every") or ""),
-                               sample=args.get("sample"),
-                               agent=self.agent if self.runner == "direct" else "")
+                               sample=args.get("sample"), agent=self.agent,
+                               runner=self.runner, owner=self.person,
+                               wake=str(args.get("wake") or ""), renew=args.get("renew"))
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         if said.get("items"):
             lines += ["Items it sees now (first few):", *[f"  {i}" for i in said["items"]]]
@@ -217,6 +244,27 @@ class Tools:
                    if last else "  not looked yet"))
         return "\n".join(lines)
 
+    def _inlet_address(self, args: dict) -> str:
+        from prahari.http import inlet_token, public_inlet
+
+        served = serving(self.state) or {}
+        url = served.get("url") or "http://<this computer>:8782/"
+        public = served.get("inlet_public") or public_inlet()
+        key = (inlet_token(self.state) if self.person in self.home
+               else self.store.inlet_key(self.person))
+        lines = [f"POST {url}inlet/WORD?key={key}   (at home, on the house's network)"]
+        if public:
+            lines.append(f"POST {public}inlet/WORD?key={key}   (from anywhere)")
+        lines += ["WORD is one lowercase word the watch listens for (whatsapp); the body "
+                  "is a small JSON object, e.g. MacroDroid's {\"title\": "
+                  "\"[notification_title]\", \"text\": \"[notification]\"}.",
+                  "The key is this person's alone and can only knock: what is sent "
+                  "reaches only their watches."]
+        if not served:
+            lines.append("Prahari is not running on this machine: nothing is heard until "
+                         "it is.")
+        return "\n".join(lines)
+
     def _watch_looks(self, args: dict) -> str:
         watch = self._mine(args)
         limit = max(1, min(int(args.get("limit") or 5), 50))
@@ -238,6 +286,7 @@ class Tools:
             self.store, name=str(args.get("name") or ""), check=args.get("check"),
             listen=str(args.get("listen") or ""), pick=args.get("pick"),
             when=args.get("when"), every=str(args.get("every") or ""),
+            wake=str(args.get("wake") or ""), renew=args.get("renew"),
             then=str(args.get("then") or ""), owner=self.person, runner=self.runner,
             agent=self.agent, allow_tools=[str(g) for g in allow],
             max_per_day=int(args.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY),
@@ -250,7 +299,7 @@ class Tools:
 
     def _update_watch(self, args: dict) -> str:
         changes = {k: args[k] for k in ("name", "check", "pick", "when", "every", "then",
-                                        "max_per_day") if k in args}
+                                        "max_per_day", "wake", "renew") if k in args}
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
                                **changes)
         return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch)}."

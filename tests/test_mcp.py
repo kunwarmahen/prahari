@@ -36,7 +36,7 @@ class TestTheHints:
     def test_reads_say_so_and_changes_do_not(self):
         hints = {t["name"]: t["annotations"]["readOnlyHint"] for t in mcp.TOOLS}
         assert {n for n, ro in hints.items() if ro} == {
-            "preview_watch", "list_watches", "watch_looks"}
+            "preview_watch", "list_watches", "watch_looks", "inlet_address"}
         assert hints["create_watch"] is False and hints["delete_watch"] is False
 
 

@@ -91,5 +91,8 @@ def report(state: Path, store: Store) -> dict:
         # Where something is sent to be heard: add the word, and the inlet's
         # key (prahari inlet prints both).
         "inlet": (served.get("url") + "inlet/") if served and served.get("url") else None,
+        "inlet_public": ((served.get("inlet_public") + "inlet/")
+                         if served and served.get("inlet_public") else None),
+        "mailboxes": len(store.mailboxes()),
         "mcp": {"command": prahari_command(), "args": ["--state", str(state), "mcp"]},
     }

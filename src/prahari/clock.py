@@ -32,6 +32,17 @@ Every rule here exists because of a way an unwatched watch goes wrong:
   a backlog of looks would all see the same page.
 * THE NEXT LOOK IS CLAIMED BEFORE THIS ONE STARTS, and one look per watch
   runs at a time.
+* A KNOCK IS HEARD BY ITS PERSON'S WATCHES ONLY. Each person has their own
+  key to the inlet, and a mailbox is one person's: what one person's
+  phone or mail says never reaches another's watch.
+* A KNOCK THAT WAKES IS ONLY "LOOK NOW". A watch with ``wake`` hears its
+  word and looks at once, with its own check -- the knock's body is not
+  read, so a mailbox or Gmail saying "something came" can't say what. A
+  knock while it is looking makes one more look after, never a pile.
+* A PUSH IS KEPT ALIVE BY ITS OWN CALL. ``renew`` runs when the watch
+  starts and once a day (an hour after a failure); it fails like a check
+  -- ``failed``, counted, three in a row pause -- because a push that
+  stopped is a watch that has gone back to looking every ``every``.
 
 WHAT A FIRE DOES is the watch's ``then``. Empty: the person is told what
 it saw, in a line, with no model at all. Otherwise the agent is given
@@ -64,6 +75,9 @@ WORKERS = 4
 FOUND_SHOWN = 10
 #: The same event body inside this many seconds is the same event.
 EVENT_WINDOW = 600
+#: How often a push is renewed, and how soon again after one failed.
+RENEW_EVERY = timedelta(days=1)
+RENEW_RETRY = timedelta(hours=1)
 
 
 class Notifier(Protocol):
@@ -78,7 +92,8 @@ class Clock:
     def __init__(self, store: Store, caller: Caller, runners: dict[str, Runner], *,
                  asker: Asker | None = None, notifier: Notifier | None = None,
                  now: Callable[[], datetime] = now_utc, workers: int = WORKERS,
-                 on_record: Callable[[Watch, Look], None] | None = None) -> None:
+                 on_record: Callable[[Watch, Look], None] | None = None,
+                 home: set[str] | None = None) -> None:
         self.store = store
         self.caller = caller
         self.runners = runners
@@ -88,7 +103,12 @@ class Clock:
         self.on_record = on_record
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="prahari")
         self._looking: set[str] = set()
+        #: Watches knocked while they looked: one more look each, after.
+        self._again: set[str] = set()
         self._lock = threading.Lock()
+        #: The names this computer's own person goes by: "local", and the
+        #: one Dvara knows them as. A knock for one is for all of them.
+        self.home = set(home or ())
 
     def close(self) -> None:
         self._pool.shutdown(wait=True)
@@ -107,6 +127,8 @@ class Clock:
     def sleep_for(self) -> float:
         upcoming = [from_iso(w.next_at) for w in self.store.watches(state="active")
                     if w.next_at and not w.listen]
+        upcoming += [from_iso(w.renew_at) for w in self.store.watches(state="active")
+                     if w.renew and w.renew_at]
         if not upcoming:
             return MAX_SLEEP
         return max(0.5, min(MAX_SLEEP, (min(upcoming) - self.now()).total_seconds()))
@@ -115,6 +137,10 @@ class Clock:
         now = self.now()
         started = []
         for watch in self.store.watches(state="active"):
+            renew = from_iso(watch.renew_at)
+            if watch.renew and renew is not None and renew <= now:
+                self.store.update(watch.id, renew_at=iso(now + RENEW_EVERY))
+                started.append(self._pool.submit(self._renew, watch))
             due = from_iso(watch.next_at)
             if watch.listen or due is None or due > now or self._busy(watch.id):
                 continue
@@ -141,16 +167,46 @@ class Clock:
 
     # -- the inlet ---------------------------------------------------------
 
-    def hear(self, source: str, body: dict) -> int:
+    def people(self, owners: set[str] | None) -> set[str] | None:
+        """Whose watches a knock for ``owners`` reaches (None: anyone's)."""
+        if owners is None:
+            return None
+        out = set(owners)
+        if out & self.home:
+            out |= self.home
+        return out
+
+    def hear(self, source: str, body: dict, owners: set[str] | None = None) -> int:
         """The inlet's door: how many watches will read it, answered at
         once; the reading happens behind (an ``ask`` waits on a model,
-        and a phone app sending a notification should not)."""
-        listening = len(self.store.watches(state="active", listen=source))
+        and a phone app sending a notification should not). ``owners``:
+        whose watches it is for, by the key it came with."""
+        whose = self.people(owners)
+        listening = [w for w in self.store.watches(state="active", listen=source)
+                     if whose is None or w.owner in whose]
+        waking = [w for w in self.store.watches(state="active", wake=source)
+                  if whose is None or w.owner in whose]
         if listening:
-            self._pool.submit(self.event, source, body)
-        return listening
+            self._pool.submit(self.event, source, body, owners)
+        for watch in waking:
+            self.wake(watch.id)
+        return len(listening) + len(waking)
 
-    def event(self, source: str, body: dict) -> list[str]:
+    def wake(self, watch_id: str) -> bool:
+        """A knock on a watch's ``wake``: look now. Already looking, it
+        looks once more when it is done. False if it can't (gone, paused)."""
+        watch = self.store.get(watch_id)
+        if watch is None or watch.state != "active" or not watch.check:
+            return False
+        with self._lock:
+            if watch.id in self._looking:
+                self._again.add(watch.id)
+                return True
+        self._claim(watch, self.now())
+        self._submit(watch, "wake")
+        return True
+
+    def event(self, source: str, body: dict, owners: set[str] | None = None) -> list[str]:
         """Something was sent to the inlet. Every active watch listening
         for ``source`` reads it; returns the ids of those it fired.
 
@@ -164,7 +220,10 @@ class Clock:
             bucket = int(self.now().timestamp()) // EVENT_WINDOW
             ident = hashlib.sha256(f"{bucket}:{text}".encode()).hexdigest()[:24]
         fired = []
+        whose = self.people(owners)
         for watch in self.store.watches(state="active", listen=source):
+            if whose is not None and watch.owner not in whose:
+                continue
             key = f"event:{ident}"
             if not self.store.unseen(watch.id, [key]):
                 continue
@@ -215,6 +274,36 @@ class Clock:
         finally:
             with self._lock:
                 self._looking.discard(watch.id)
+                again = watch.id in self._again
+                self._again.discard(watch.id)
+            if again:
+                self.wake(watch.id)
+
+    def _renew(self, watch: Watch) -> Look:
+        """The call that keeps a sender knocking (Gmail's push), made on the
+        watch's own road and granted word for word, as its check is."""
+        from dataclasses import replace
+
+        look = self.store.start_look(watch.id, "renew", self.now())
+        try:
+            called = self.caller.call(replace(watch, check=watch.renew))
+        except Exception as exc:
+            called = Called(ok=False, detail=f"{type(exc).__name__}: {exc}")
+        if called.ok:
+            look.outcome = "quiet"
+            look.detail = "renewed: " + " ".join(called.text.split())[:300]
+            if watch.trouble:
+                self.store.update(watch.id, trouble=0)
+        else:
+            look.outcome = "needs_person" if called.needs else "failed"
+            look.detail = ("renewing its push: "
+                           + ("; ".join(called.needs) or called.detail or "it failed"))
+            self.store.update(watch.id, renew_at=iso(self.now() + RENEW_RETRY))
+            if called.needs:
+                self._pause(watch, look, f"needs you: {look.detail}")
+            else:
+                self._trouble(watch, look)
+        return self._done(watch, look)
 
     def _decide(self, watch: Watch, look: Look, text: str, inlet: bool = False,
                 heard: str = "") -> bool:

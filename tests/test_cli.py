@@ -83,3 +83,60 @@ class TestStatus:
         assert len(key) >= 16 and json.loads(run(tmp_path, capsys, "inlet",
                                                  "--json")[1])["key"] == key
         assert oct((tmp_path / "inlet.token").stat().st_mode)[-3:] == "600"
+
+
+class TestPushAndPeople:
+    def test_a_watch_woken_by_a_word_says_so(self, tmp_path, capsys):
+        rc, out, _ = run(tmp_path, capsys, "add", "Bank mail", "--check", "t",
+                         "--args", '{"q": "from:bank"}', "--pick", r"items:thread (\w+)",
+                         "--when", "new", "--every", "6h", "--wake", "work-mail")
+        assert rc == 0 and "at once whenever work-mail knocks" in out
+
+    def test_each_person_gets_their_own_inlet_key(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.delenv("PRAHARI_DVARA_URL", raising=False)
+        mine = json.loads(run(tmp_path, capsys, "inlet", "--json")[1])
+        theirs = json.loads(run(tmp_path, capsys, "inlet", "--for", "asha", "--json")[1])
+        again = json.loads(run(tmp_path, capsys, "inlet", "--for", "asha", "--json")[1])
+        fresh = json.loads(run(tmp_path, capsys, "inlet", "--for", "asha", "--new-key",
+                               "--json")[1])
+        assert mine["key"] != theirs["key"] and theirs["key"] == again["key"]
+        assert fresh["key"] != theirs["key"] and theirs["for"] == "asha"
+
+    def test_a_mailbox_is_added_with_its_password_from_stdin(self, tmp_path, capsys,
+                                                             monkeypatch):
+        import io
+
+        from fake_imap import FakeImap
+
+        imap = FakeImap()
+        try:
+            monkeypatch.setattr("sys.stdin", io.StringIO("app-password\n"))
+            rc, out, _ = run(tmp_path, capsys, "mailbox", "add", "work-mail", "--server",
+                             "127.0.0.1", "--port", str(imap.port), "--user",
+                             "me@example.com", "--password-stdin", "--no-tls")
+        finally:
+            imap.close()
+        assert rc == 0 and "kept as work-mail" in out and "--wake work-mail" in out
+        rc, out, _ = run(tmp_path, capsys, "mailbox", "list")
+        assert "work-mail" in out and "app-password" not in out
+        rc, out, _ = run(tmp_path, capsys, "mailbox", "rm", "work-mail")
+        assert rc == 0 and "forgotten" in out
+
+
+def test_a_file_made_before_wake_opens_and_gains_it(tmp_path):
+    import sqlite3
+
+    from prahari.store import Store
+
+    path = tmp_path / "prahari.sqlite3"
+    Store(path)
+    db = sqlite3.connect(path)
+    for column in ("wake", "renew", "renew_at"):
+        db.execute(f'ALTER TABLE watch DROP COLUMN "{column}"')
+    db.commit()
+    db.close()
+    store = Store(path)
+    from prahari import watches
+    made = watches.create(store, name="x", check={"tool": "t", "args": {}},
+                          when={"changed": True}, every="1h")
+    assert store.get(made.id).wake == "" and store.get(made.id).renew == {}

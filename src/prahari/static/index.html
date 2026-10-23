@@ -74,6 +74,7 @@ header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margi
 .btn[disabled] { opacity: .5; cursor: default; }
 .note { background: var(--teal-soft); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
 .note.bad { background: rgba(179, 38, 30, .1); }
+.inlet .bad { color: var(--bad); }
 
 .watch { border-top: 1px solid var(--line); padding: 14px 0; }
 .watch:last-child { border-bottom: 1px solid var(--line); }
@@ -160,6 +161,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       <label>Every <input name="every" placeholder="3h"></label>
       <label>Most times a day <input name="max_per_day" type="number" min="1" max="200" value="10"></label>
     </div>
+    <label>…and look at once when this knocks (a mailbox, Gmail's push) <input name="wake" placeholder="work-mail"></label>
     <label>Then ask the agent (leave empty to just tell you)
       <textarea name="then" placeholder="Tell me the new price and whether it's the lowest this month."></textarea></label>
     <div class="tried hidden" id="tried"></div>
@@ -171,6 +173,9 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
 
   <div class="bar"><h2>The inlet</h2></div>
   <div class="inlet" id="inlet">…</div>
+
+  <div class="bar"><h2>Mailboxes</h2></div>
+  <div class="inlet" id="mailboxes">…</div>
 
   <div class="bar"><h2>Lately</h2><span class="grow"></span>
     <span id="looks-of" class="empty"></span>
@@ -235,6 +240,8 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       return `<div class="watch" data-id="${esc(w.id)}">
         <div class="top"><span class="name">${esc(w.name)}</span>
           ${w.listen ? `<span class="tag listen">listens: ${esc(w.listen)}</span>` : ""}
+          ${w.wake ? `<span class="tag listen">woken by: ${esc(w.wake)}</span>` : ""}
+          ${w.owner !== "local" ? `<span class="tag">for ${esc(w.owner)}</span>` : ""}
           ${w.state === "paused" ? `<span class="tag paused">paused</span>` : ""}
           ${w.fired_today ? `<span class="tag">fired ${w.fired_today}× today</span>` : ""}</div>
         <div class="says">${esc(w.sentence)}. ${esc(w.does)}.</div>
@@ -274,16 +281,36 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       tracker's webhook — can tell Prahari something happened. Its key can only knock:
       with it, nothing can be read or changed.</p>
       <div class="row"><b>Send</b><code>POST ${esc(url)}${esc(word)}</code></div>
+      ${s.public_url ? `<div class="row"><b>Outside</b><code>POST ${esc(s.public_url)}${esc(word)}</code>
+        <span class="empty">from anywhere: the inlet alone, nothing else</span></div>` : ""}
       <div class="row"><b>Key</b><code id="key" data-key="${esc(s.key)}">••••••••••••</code>
         <button class="btn link" type="button" id="show-key">Show</button>
         <button class="btn link" type="button" id="copy-url">Copy the address with its key</button></div>
       <div class="row"><b>Body</b><code>{"title": "[notification_title]", "text": "[notification]"}</code></div>
-      <div class="row"><b>Heard</b>${s.words.length ? s.words.map((w) => `<code>${esc(w)}</code>`).join(" ") : `<span class="empty">no watch listens yet</span>`}</div>`;
+      <div class="row"><b>Heard</b>${s.words.length ? s.words.map((w) => `<code>${esc(w)}</code>`).join(" ") : `<span class="empty">no watch listens yet</span>`}</div>
+      <p class="hint">This key is this computer's person's. Everyone else in the house has a
+        key of their own, so what their phone says reaches only their watches: their agent
+        tells them theirs, or <code>prahari inlet --for NAME</code>.
+        ${s.people && s.people.length ? `Keys given: ${s.people.map(esc).join(", ")}.` : ""}</p>`;
     $("show-key").onclick = () => { $("key").textContent = $("key").dataset.key; };
     $("copy-url").onclick = async () => {
       try { await navigator.clipboard.writeText(`${url}${word}?key=${s.key}`);
             $("copy-url").textContent = "Copied"; } catch (_) { $("key").textContent = $("key").dataset.key; }
     };
+  }
+
+  async function mailboxes() {
+    const { mailboxes } = await api("GET", "mailboxes");
+    $("mailboxes").innerHTML = mailboxes.length ? mailboxes.map((b) => `
+      <div class="row"><b>${esc(b.name)}</b><code>${esc(b.user)} on ${esc(b.server)} · ${esc(b.folder)}</code>
+        <span class="${b.state === "trouble" ? "bad" : "empty"}">${esc(b.said || b.state)}</span>
+        <span class="empty">for ${esc(b.owner)}</span></div>`).join("") +
+      `<p class="hint">A new mail knocks on its name: a watch can listen for it (who it is from,
+        the subject) or be woken by it to look at once.</p>`
+      : `<p class="hint">A mail folder kept open (IMAP IDLE) tells Prahari the moment mail
+        lands, instead of a look every half hour. Add one at this computer:
+        <code>prahari mailbox add work-mail --server imap.fastmail.com --user you@example.com</code>
+        (it asks for an app password, kept for you alone).</p>`;
   }
 
   $("watches").addEventListener("click", async (e) => {
@@ -313,6 +340,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     else out.check = { tool: f.tool.value.trim(), args: f.args.value.trim() ? JSON.parse(f.args.value) : {} };
     out.pick = pickOf(f.pick.value); out.when = whenOf(f.when.value);
     if (!out.listen) out.every = f.every.value.trim() || "1h";
+    if (!out.listen && f.wake.value.trim()) out.wake = f.wake.value.trim();
     return out;
   }
   function pickOf(text) {
@@ -358,7 +386,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     await looks();
   }
   if (!token) { $("no-token").classList.remove("hidden"); return; }
-  refresh().then(inlet).catch(fail);
+  refresh().then(inlet).then(mailboxes).catch(fail);
   setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 15000);
 })();
 </script>

@@ -228,14 +228,12 @@ that only new items are asked about.
 
 * **A script the agent writes.** A recipe is a form a person can read on
   a card; a script is code nobody reviews, running with their accounts.
-* **Mail pushed instead of polled.** IMAP IDLE and Gmail's push through
-  a Pub/Sub pull subscription would cut a mail's delay from minutes to
-  seconds, with no public address. They would sit behind the same
-  check. A look every 15–30 minutes is good enough to start with.
-* **A public inlet.** The inlet is on the house's network, like every
-  page Sarathi starts. A webhook from the internet would need Setu's
-  catalog road (Tailscale Funnel), and a reason.
-* **Watches for everyone in the house.** A look runs with the owner's
-  accounts. A watch for someone else would need a look through Dvara as
-  that person, with their own Setu folder. Until then, Dvara offers the
-  tools to its owner only.
+* ~~**Mail pushed instead of polled.**~~ Built: a mailbox kept open with
+  IMAP IDLE, and Gmail's push renewed once a day, both knocking to wake
+  a watch's look ([note 02](02-a-watch-for-everyone.md)).
+* ~~**A public inlet.**~~ Built: the inlet alone on a port of its own,
+  for Tailscale Funnel, with a limit on knocks
+  ([note 02](02-a-watch-for-everyone.md)).
+* ~~**Watches for everyone in the house.**~~ Built: a look through Dvara
+  as its person, and each person's own inlet key
+  ([note 02](02-a-watch-for-everyone.md)).
