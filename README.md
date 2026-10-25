@@ -271,6 +271,8 @@ curl -X POST "http://127.0.0.1:8782/inlet/whatsapp?key=<key>" \
 3. Your computer's address is the one Sarathi's `[house]` name gives
    (`linux-al-ml-beast.local`), or its LAN address; the phone must be
    able to reach port 8782 (Sarathi's `up` prints the firewall line).
+   If the phone also knocks over a VPN, use your router's name for the
+   computer instead: `.local` is only found on the Wi-Fi itself.
 
 That's all: the phone tells Prahari, the watch decides, and the agent
 answers in your chat. No polling, nothing unofficial logged in to
