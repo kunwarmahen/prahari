@@ -24,7 +24,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from prahari import __version__
+from prahari import version
 from prahari.store import Store
 
 FORMAT = "prahari.status.v1"
@@ -81,7 +81,8 @@ def report(state: Path, store: Store) -> dict:
              or os.environ.get("PRAHARI_DVARA_URL", "").strip() or None)
     return {
         "format": FORMAT,
-        "version": __version__,
+        "version": version.version(),
+        "commit": version.commit(),
         "state": str(state),
         "serving": served is not None,
         "url": served.get("url") if served else None,

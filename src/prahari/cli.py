@@ -47,7 +47,7 @@ import sys
 import threading
 from pathlib import Path
 
-from prahari import __version__, mailbox, mcp, recipe, watches
+from prahari import __version__, mailbox, mcp, recipe, version, watches
 from prahari.clock import Clock
 from prahari.dvara import Dvara, DvaraCaller, DvaraError, DvaraNotifier, DvaraRunner
 from prahari.http import (DEFAULT_PORT, Api, PrahariServer, inlet_token, public_inlet,
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state", metavar="DIR",
                         help="where watches and looks are kept "
                              "(default: $PRAHARI_STATE or ~/.prahari)")
-    parser.add_argument("--version", action="version", version=f"prahari {__version__}")
+    parser.add_argument("--version", action=version.Show)
     sub = parser.add_subparsers(dest="command", required=True)
 
     def recipe_flags(p, *, needed: bool) -> None:

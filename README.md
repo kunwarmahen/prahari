@@ -558,6 +558,9 @@ deploy/
 └── public-inlet-tailscale.sh   the inlet alone on a public HTTPS name (Funnel)
 ├── mcp.py       the agent's tools, for one person (stdio MCP, by hand)
 ├── keeps.py     prahari keeps --json: where the watches are, for a backup
+├── version.py   prahari --version and status's "version": the day of the last
+│                commit and that day's count (2026.10.25.3), with the commit;
+│                from git, else the VERSION file `sarathi image` writes
 ├── status.py    prahari status --json: here, watching (a lock, not a pid)
 ├── unit.py      prahari unit: a systemd user unit
 └── cli.py       the commands above
