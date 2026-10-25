@@ -18,7 +18,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -151,7 +151,10 @@ class TestRenewing:
         store, clock = make_clock(tmp_path, caller)
         watch = mail_watch(store, renew={"tool": "mcp__gmail__watch_mailbox",
                                          "args": {"account": "personal", "topic": TOPIC}})
-        clock.now.move(days=2)       # past the moment it was made, on the test's clock
+        # past the moment it was made: renew_at is the real clock's, so the
+        # test's clock starts from whichever is later, its START or today
+        clock.now.at = max(clock.now.at, datetime.now(UTC))
+        clock.now.move(days=2)
         return caller, store, clock, watch
 
     def test_it_renews_at_the_start_and_then_a_day_later(self, tmp_path):
