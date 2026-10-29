@@ -152,6 +152,7 @@ prahari looks                  # newest first, every watch
 prahari show 1e69              # one watch in full (the first letters of its id will do)
 prahari look 1e69              # look once, now, here -- and wait
 prahari edit 1e69 --every 2h   # mend its check, pick, test, how often or then
+                               # (how often alone keeps what it saw)
 prahari pause 1e69 | resume 1e69 | rm 1e69
 ```
 
@@ -394,8 +395,9 @@ banned for them.
 ### The page
 
 `prahari serve` serves a page at the address it prints: every watch in
-words, when it looks next and what it saw last, with **Look now**,
-**Pause** / **Resume**, **Looks** (its history) and **Delete**; the
+words, when it looks next and what it saw last, with **Look now**, an
+**every** box and **Save** to change how often it looks (30m, 3h, 1d;
+no less than 5 minutes), **Pause** / **Resume**, **Looks** (its history) and **Delete**; the
 inlet's address, its key behind **Show**, and the body for MacroDroid;
 and **Lately**, the last looks across all watches. **New watch** writes
 one by hand, and **Try it** looks once and says what it sees before

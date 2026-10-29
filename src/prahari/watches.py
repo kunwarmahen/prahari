@@ -33,7 +33,7 @@ import re
 from datetime import timedelta
 
 from prahari import recipe
-from prahari.store import RUNNERS, Store, Watch, iso, now_utc
+from prahari.store import RUNNERS, Store, Watch, from_iso, iso, now_utc
 
 #: The person at this computer -- Samay's word for it too.
 LOCAL_OWNER = "local"
@@ -172,6 +172,10 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     A CHANGED RECIPE STARTS OVER. What the old one remembered -- its last
     value, what it had seen -- was picked by the old pick, so the next
     look learns again instead of comparing apples with what came before.
+
+    HOW OFTEN IS NOT THE RECIPE. ``every`` alone changes when it looks, not
+    what it looks for: what it remembered stays, and the next look comes
+    at the sooner of the one already due and now plus the new step.
     """
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "check", "pick", "when", "every", "then", "allow_tools",
@@ -181,7 +185,8 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
-    recipe_keys = {"check", "pick", "when", "every"}
+    recipe_keys = {"check", "pick", "when"} | ({"every"} if {"check", "pick", "when"}
+                                                & set(given) else set())
     parts = checked(
         name=given.get("name", watch.name),
         check=given.get("check", watch.check) if not watch.listen else None,
@@ -199,6 +204,11 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
             fields["next_at"] = iso(now_utc())
         if watch.state == "paused" and watch.paused_because.startswith(("broken", "failed")):
             fields.update(state="active", paused_because="")
+    if "every" in given and not recipe_keys & set(given) and not watch.listen:
+        fields["every"] = parts["every"]
+        soon = now_utc() + recipe.every(parts["every"])
+        due = from_iso(watch.next_at)
+        fields["next_at"] = iso(min(due, soon) if due else soon)
     if "then" in given:
         fields["then"] = str(given["then"]).strip()
     if "allow_tools" in given:

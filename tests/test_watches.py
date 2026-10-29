@@ -104,6 +104,25 @@ class TestMending:
         with pytest.raises(WatchError, match="can.t change listen"):
             watches.update(store, make(store).id, listen="sms")
 
+    def test_how_often_alone_keeps_the_memory_and_brings_the_next_look_nearer(self, store):
+        from datetime import timedelta
+
+        from prahari.store import from_iso, iso, now_utc
+        watch = make(store, every="1d")
+        later = now_utc() + timedelta(hours=20)
+        store.update(watch.id, looked=True, last_value="47.0", armed=False,
+                     next_at=iso(later))
+        store.remember(watch.id, ["a"])
+        mended = watches.update(store, watch.id, every="30m")
+        assert mended.every == "30m" and mended.last_value == "47.0" and not mended.armed
+        assert store.unseen(watch.id, ["a"]) == []
+        assert from_iso(mended.next_at) <= now_utc() + timedelta(minutes=31)
+        # slower: the look already due stays where it was
+        assert from_iso(watches.update(store, watch.id, every="2d").next_at) \
+            == from_iso(mended.next_at)
+        with pytest.raises(WatchError, match="too often"):
+            watches.update(store, watch.id, every="1m")
+
     def test_a_new_then_keeps_the_memory(self, store):
         watch = make(store)
         store.update(watch.id, looked=True, last_value="47.0")

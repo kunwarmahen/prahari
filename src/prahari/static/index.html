@@ -88,6 +88,10 @@ header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margi
 .watch .last { font-size: 14px; color: var(--ink-3); }
 .watch .paused-why { font-size: 14px; color: var(--needs); }
 .watch .acts { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 2px; margin-left: -6px; }
+.watch .every { display: inline-flex; align-items: center; gap: 4px; padding-left: 6px;
+  color: var(--ink-2); }
+.watch .every input { width: 4.5em; padding: 2px 6px; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--sheet, transparent); }
 .out { display: inline-block; min-width: 64px; font-size: 12px; font-weight: 600;
        border-radius: 999px; padding: 0 8px; text-align: center; background: var(--sunk);
        color: var(--ink-2); }
@@ -250,6 +254,9 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
           ${w.next_at && !w.listen && w.state === "active" ? ` · next look ${when(w.next_at)}` : ""}</div>
         <div class="acts">
           ${w.listen ? "" : `<button class="btn link" data-act="look">Look now</button>`}
+          ${w.listen ? "" : `<span class="every">every <input class="every-box" value="${esc(w.every)}"
+            aria-label="how often it looks, like 30m, 3h or 1d" size="5">
+            <button class="btn link" data-act="every">Save</button></span>`}
           <button class="btn link" data-act="${w.state === "paused" ? "resume" : "pause"}">${w.state === "paused" ? "Resume" : "Pause"}</button>
           <button class="btn link" data-act="looks">Looks</button>
           <button class="btn link danger" data-act="delete">Delete</button></div></div>`;
@@ -323,6 +330,10 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       if (act === "looks") { lookingAt = { id, name }; await looks(); $("looks").scrollIntoView({ behavior: "smooth" }); return; }
       if (act === "delete" && !confirm(`Delete "${name}", its looks and what it saw?`)) return;
       if (act === "delete") await api("DELETE", `watches/${id}`);
+      else if (act === "every") {
+        // how often alone: what it saw is kept (watches.update)
+        await api("PATCH", `watches/${id}`, { every: row.querySelector(".every-box").value.trim() });
+      }
       else await api("POST", `watches/${id}/${act}`);
       if (act === "look") btn.textContent = "Looking…";
       await refresh();

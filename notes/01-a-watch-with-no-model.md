@@ -101,7 +101,10 @@ it breaks:
   previews a new pick against today's page and calls `update_watch`.
   The watch keeps its id and history. A changed recipe starts its
   memory over, so values picked the old way are never compared with the
-  new.
+  new. How often it looks is not the recipe: `every` alone keeps
+  what it saw, and the next look comes at the sooner of the one already
+  due and now plus the new step (the page's **every** box, or
+  `prahari edit ID --every 30m`).
 
 ## Asking the model last
 
