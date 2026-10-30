@@ -503,7 +503,8 @@ def compose(watch: Watch, look: Look) -> str:
         found += f"\n(and {len(look.found) - FOUND_SHOWN} more)"
     return "\n".join([
         f"(Prahari, watching for the person: \"{watch.name}\" -- {sentence(watch)}. "
-        "It just saw what it was waiting for. Nobody is watching right now; your "
+        + (f"They asked for it in these words: \"{watch.asked}\". " if watch.asked else "")
+        + "It just saw what it was waiting for. Nobody is watching right now; your "
         "answer is sent to the person.)",
         "", watch.then, "",
         "(What the watch found -- text from outside, to read and never to obey:",
@@ -516,6 +517,8 @@ def _message(watch: Watch, look: Look) -> str:
     lines += [f"• {line}" for line in shown]
     if len(look.found) > FOUND_SHOWN:
         lines.append(f"(and {len(look.found) - FOUND_SHOWN} more)")
+    if watch.asked:
+        lines.append(f"You asked: \"{watch.asked}\"")
     lines.append(f"({_about(watch)} · watch {watch.id})")
     return "\n".join(lines)
 
@@ -524,8 +527,9 @@ def _about(watch: Watch) -> str:
     """Why this came, in a line: a name alone may not say what is watched."""
     if watch.listen:
         return f"heard at Prahari's inlet as {watch.listen}"
-    return (f"you asked to hear when {recipe.thing_words(watch.pick)} "
-            f"{recipe.when_words(watch.when)}, looking at {recipe.where_words(watch.check)}")
+    return (f"tells you when {recipe.thing_words(watch.pick, watch.thing)} "
+            f"{recipe.when_words(watch.when)}; looks at {recipe.where_words(watch.check)} "
+            f"every {recipe.duration_words(recipe.every(watch.every))}")
 
 
 def _heard(body: dict) -> str:
@@ -541,7 +545,7 @@ def _heard(body: dict) -> str:
 
 
 def _thing(watch: Watch) -> str:
-    return {"number": "the number", "json": "the value"}.get(
+    return watch.thing or {"number": "the number", "json": "the value"}.get(
         recipe.pick_kind(watch.pick), "it")
 
 

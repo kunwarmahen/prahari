@@ -66,8 +66,19 @@ class TestTheFirstLook:
         assert "47.1" in notifier.sent[0][1] and "ALAB under $50" in notifier.sent[0][1]
         # A name alone may not say what is watched: the message says why it came.
         assert notifier.sent[0][1].endswith(
-            f"(you asked to hear when the number is below 50, looking at "
-            f"{watches.recipe.where_words(watch.check)} · watch {watch.id})")
+            f"(tells you when the number is below 50; looks at "
+            f"{watches.recipe.where_words(watch.check)} every hour · watch {watch.id})")
+
+    def test_a_message_says_what_it_read_and_what_it_is_for(self, tmp_path):
+        notifier = FakeNotifier()
+        store, clock = make_clock(tmp_path, FakeCaller("Last 47.10"), notifier=notifier)
+        watch = price_watch(store, asked="tell me if ALAB gets cheap", thing="ALAB's price")
+        look(clock, store, watch)
+        assert notifier.sent[0][1].splitlines() == [
+            "ALAB under $50:", "• ALAB's price is now 47.1",
+            'You asked: "tell me if ALAB gets cheap"',
+            f"(tells you when ALAB's price is below 50; looks at x.example every hour "
+            f"· watch {watch.id})"]
 
 
 class TestTheEdge:

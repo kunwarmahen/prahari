@@ -64,9 +64,10 @@ class TestMadeWhole:
             pick={"number": r"\$([\d,]+)"}, when={"below": 571})
         assert flights.name == "google.com/travel/flights: the number is below 571"
         mail = make(store, name="", check={"tool": "mcp__gmail__search_threads",
-                                            "args": {"query": "from:bank"}},
+                                            "args": {"account": "home",
+                                                     "query": "from:bank"}},
                     pick={"items": r"thread (\w+)"}, when={"new": True})
-        assert mail.name == ("mcp__gmail__search_threads 'from:bank': the list has "
+        assert mail.name == ("mcp__gmail__search_threads for 'from:bank': the list has "
                              "something new")
 
     def test_a_new_watch_looks_soon(self, store):
@@ -76,10 +77,29 @@ class TestMadeWhole:
     def test_a_cap_per_person(self, store, monkeypatch):
         monkeypatch.setenv("PRAHARI_MAX_WATCHES", "2")
         make(store)
-        make(store)
+        make(store, when={"below": 40}, pick={"number": "Last"})
         with pytest.raises(WatchError, match="has 2 watches already"):
-            make(store)
+            make(store, pick={"number": "Bid"})
         make(store, owner="asha")                 # someone else's count is theirs
+
+    def test_one_thing_one_watch(self, store):
+        """The same call and pick twice is a second name for one watch: refused,
+        naming the one there is. Another test on it is mended, not added."""
+        first = make(store)
+        with pytest.raises(WatchError, match=f"already has a watch on exactly this: "
+                                             f"{first.id} \\(price\\)"):
+            make(store, name="price again", when={"changed": True})
+        make(store, owner="asha")                 # someone else's is theirs
+        make(store, pick={"number": "Bid"})       # another number on the page is another
+
+    def test_what_it_is_for_and_what_it_reads(self, store):
+        watch = make(store, asked="tell me if ALAB gets cheap", thing="ALAB's price")
+        assert watch.asked == "tell me if ALAB gets cheap"
+        assert "when ALAB's price is below 50" in watches.sentence(watch)
+        with pytest.raises(WatchError, match="40 letters"):
+            make(store, pick={"number": "Bid"}, thing="x" * 41)
+        mended = watches.update(store, watch.id, asked="tell me when it's under 50")
+        assert mended.asked == "tell me when it's under 50" and mended.last_value == ""
 
 
 class TestOnePersonsWatches:

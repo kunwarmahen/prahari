@@ -227,6 +227,10 @@ was taken by a training run. Both are covered offline: the then-turn's
 prompt, with its marked block, is pinned by a test, and so is the rule
 that only new items are asked about.
 
+What a watch says when it speaks — the person's own words, what its
+pick takes, one watch per call and pick — is
+[note 03](03-a-watch-says-what-it-is-for.md).
+
 ## What was deliberately not built
 
 * **A script the agent writes.** A recipe is a form a person can read on

@@ -46,7 +46,8 @@ class TestTheTools:
         said = t.call("preview_watch", {"check": CHECK, "pick": {"number": ""},
                                         "when": {"below": 50}, "every": "3h"})
         assert "every 3 hours" in said and "already matches" in said
-        made = t.call("create_watch", {"name": "ALAB", "check": CHECK,
+        made = t.call("create_watch", {"name": "ALAB", "asked": "tell me if ALAB dips",
+                                       "check": CHECK,
                                        "pick": {"number": ""}, "when": {"below": 50},
                                        "every": "3h"})
         assert made.startswith("Saved ") and "not running on this machine" in made
@@ -72,7 +73,8 @@ class TestTheTools:
 
     def test_mend_a_broken_watch(self, store, tmp_path):
         t = tools(store, tmp_path)
-        t.call("create_watch", {"name": "p", "check": CHECK, "pick": {"number": "Last"},
+        t.call("create_watch", {"name": "p", "asked": "p", "check": CHECK,
+                                "pick": {"number": "Last"},
                                 "when": {"below": 50}, "every": "1h"})
         (watch,) = store.watches()
         watches.pause(store, watch.id, because="broken 3 times in a row; last: ...")
@@ -83,7 +85,32 @@ class TestTheTools:
     def test_a_mistake_is_a_failed_call_the_model_can_read(self, store, tmp_path):
         with pytest.raises(mcp.ToolFailed, match="belw"):
             tools(store, tmp_path).call("create_watch", {
-                "name": "x", "check": CHECK, "when": {"belw": 50}, "every": "1h"})
+                "name": "x", "asked": "x", "check": CHECK, "when": {"belw": 50},
+                "every": "1h"})
+
+    def test_an_agent_says_what_the_watch_is_for(self, store, tmp_path):
+        """The person wasn't watching it being written: no name, or no words of
+        theirs, and the model is told to give them."""
+        t = tools(store, tmp_path)
+        recipe = {"check": CHECK, "pick": {"number": ""}, "when": {"below": 50},
+                  "every": "3h"}
+        with pytest.raises(mcp.ToolFailed, match="give name and asked"):
+            t.call("create_watch", recipe)
+        with pytest.raises(mcp.ToolFailed, match="give asked"):
+            t.call("create_watch", {**recipe, "name": "ALAB"})
+        assert store.watches() == []
+
+    def test_a_second_watch_on_the_same_thing_is_named_at_preview(self, store, tmp_path):
+        t = tools(store, tmp_path)
+        recipe = {"check": CHECK, "pick": {"number": ""}, "when": {"below": 50},
+                  "every": "3h"}
+        t.call("create_watch", {**recipe, "name": "ALAB", "asked": "ALAB under 50",
+                                "thing": "ALAB's price"})
+        (first,) = store.watches()
+        said = t.call("preview_watch", {**recipe, "when": {"changed": True}})
+        assert f"already has a watch on exactly this: {first.id} (ALAB)" in said
+        assert "when ALAB's price is below 50" in said
+        assert 'ALAB (asked: "ALAB under 50")' in t.call("list_watches", {})
 
 
 class TestTheProcess:

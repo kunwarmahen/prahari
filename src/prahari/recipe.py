@@ -335,16 +335,22 @@ def holds(when: dict, picked: Picked) -> bool | None:
     return None
 
 
-def sentence(check: dict, listen: str, pick: dict, when: dict, step: str) -> str:
-    """The watch in words: what is looked at, how often, and when it fires."""
+def sentence(check: dict, listen: str, pick: dict, when: dict, step: str,
+             thing: str = "") -> str:
+    """The watch in words: what is looked at, how often, and when it fires.
+    WHERE, NOT WITH WHAT: "looks at google.com/travel/flights", the tool
+    only after it -- the person knows the page, not the tool."""
     test = next(iter(when))
     what = when_words(when)
-    thing = thing_words(pick)
+    thing = thing_words(pick, thing)
     if listen:
         head = f"when {listen} sends something"
         return f"{head}, if {thing} {what}" if test != "any" else head
     tool = check.get("tool", "?")
-    look = f"every {duration_words(every(step))}, looks with {tool}"
+    where = where_words(check)
+    look = (f"every {duration_words(every(step))}, "
+            + (f"looks with {where}" if where.startswith(tool)
+               else f"looks at {where} (with {tool})"))
     edge = (" (once each time it becomes true)" if test in EDGED else "")
     return f"{look}; tells you when {thing} {what}{edge}"
 
@@ -360,8 +366,11 @@ def when_words(when: dict) -> str:
             "any": "comes in", "ask": f"makes the answer to {want!r} yes"}[test]
 
 
-def thing_words(pick: dict) -> str:
-    """What the pick takes, in words: "the number", "the list"."""
+def thing_words(pick: dict, thing: str = "") -> str:
+    """What the pick takes, in words: the watch's own ("the fare"), else
+    its kind ("the number", "the list")."""
+    if thing:
+        return thing
     return {"number": "the number", "text": "the text", "json": "the value",
             "items": "the list", "items_json": "the list", "": "the result"}[pick_kind(pick)]
 
@@ -371,7 +380,9 @@ def where_words(check: dict) -> str:
     ("google.com/travel/flights"), else its first words of argument (a
     mail search's query), else the tool's name."""
     args = check.get("args") or {}
-    texts = [v.strip() for v in args.values() if isinstance(v, str) and v.strip()]
+    # What narrows the call says most: a search's query before an account's name.
+    first = [args[k] for k in ("url", "query", "q", "search") if k in args]
+    texts = [v.strip() for v in [*first, *args.values()] if isinstance(v, str) and v.strip()]
     for text in texts:
         address = re.match(r"https?://(?:www\.)?([^/?#]+)((?:/[^/?#]+){0,2})", text)
         if address:
@@ -379,7 +390,7 @@ def where_words(check: dict) -> str:
     tool = str(check.get("tool") or "?")
     if texts:
         said = " ".join(texts[0].split())
-        return f"{tool} {said if len(said) <= 40 else said[:39] + '…'!r}"
+        return f"{tool} for {said if len(said) <= 40 else said[:39] + '…'!r}"
     return tool
 
 

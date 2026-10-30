@@ -191,7 +191,7 @@ class Api:
                 pick=body.get("pick"), when=body.get("when"),
                 every=str(body.get("every") or ""), sample=body.get("sample"),
                 agent=str(body.get("agent") or ""), wake=str(body.get("wake") or ""),
-                renew=body.get("renew"))
+                renew=body.get("renew"), thing=str(body.get("thing") or ""))
         if parts == ["looks"] and method == "GET":
             limit = _int(query.get("limit", ["50"])[0], "limit")
             watch_id = query.get("watch", [None])[0]
@@ -238,7 +238,8 @@ class Api:
             listen=str(body.get("listen") or ""), pick=body.get("pick"),
             when=body.get("when"), every=str(body.get("every") or ""),
             wake=str(body.get("wake") or ""), renew=body.get("renew"),
-            then=str(body.get("then") or ""), owner=str(body.get("as")
+            then=str(body.get("then") or ""), asked=str(body.get("asked") or ""),
+            thing=str(body.get("thing") or ""), owner=str(body.get("as")
                                                         or watches.LOCAL_OWNER),
             runner=runner, agent=str(body.get("agent") or ""), allow_tools=allow,
             max_per_day=_int(body.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY,

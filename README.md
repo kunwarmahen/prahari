@@ -73,7 +73,8 @@ starts Yantra as a program and reads the JSON it prints. It imports
 nothing from Yantra and has no dependencies of its own.
 
 How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no-model.md);
-[02 — a watch for everyone, mail that knocks, and a door to the street](notes/02-a-watch-for-everyone.md).
+[02 — a watch for everyone, mail that knocks, and a door to the street](notes/02-a-watch-for-everyone.md);
+[03 — a watch says what it is for](notes/03-a-watch-says-what-it-is-for.md).
 
 ## Works with
 
@@ -116,18 +117,19 @@ when a watch fires with a `then`, or for a test that asks a yes/no
 prahari preview --check mcp__gmail__search_threads \
     --args '{"account": "personal", "query": "from:alerts@bank.example newer_than:2d"}' \
     --pick 'items:thread (\w+)' --when new --every 30m
-#   every 30 minutes, looks with mcp__gmail__search_threads; tells you when the list has something new
+#   every 30 minutes, looks with mcp__gmail__search_threads for 'from:alerts@bank.example newer_than:2d'; tells you when the list has something new
 #   It sees 1 item(s) now; the first look remembers them, and only ones after that are news.
 
 # save it
 prahari add "Mail from the bank" --check mcp__gmail__search_threads \
     --args '{"account": "personal", "query": "from:alerts@bank.example newer_than:2d"}' \
-    --pick 'items:thread (\w+)' --when new --every 30m
+    --pick 'items:thread (\w+)' --when new --every 30m \
+    --asked "tell me when the bank writes"
 
 # a price, from a public JSON address, and the agent's view when it drops
 prahari add "BTC under 60k" --check web_fetch \
     --args '{"url": "https://api.coinbase.com/v2/prices/BTC-USD/spot"}' \
-    --pick 'json:data.amount' --when 'below 60000' --every 1h \
+    --pick 'json:data.amount' --when 'below 60000' --every 1h --thing "BTC's price" \
     --then "Tell me the price, and how far it fell this week."
 
 # keep it running (nothing is looked at otherwise)
@@ -226,6 +228,14 @@ more look after, never a pile.
 the watch starts and once a day: Gmail's push lasts seven days. It runs
 on the watch's own road, granted word for word like the check; one that
 fails is `failed`, and is tried again in an hour.
+
+**asked** and **thing** — what the watch is for, and what its pick
+takes, so you can tell later what it watches. `--asked` is what you asked
+for, in your own words: it is shown first wherever the watch is, and
+ends every message it sends. `--thing` names the number ("the fare",
+"the temperature"), so a message says *the fare is now 58* instead of
+*the number is now 58*. An agent must give a name and `asked`; by hand
+both are yours to leave out.
 
 **then** — what the agent is asked when it fires, with nobody watching.
 Leave it out, and you get a line saying what was seen, with no model
@@ -440,7 +450,7 @@ prahari mcp --for local --agent ~/agents/reader     # what a harness starts
 | `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
-| `create_watch` | saves one, after the person agreed |
+| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first |
 | `update_watch` | mends one: a site moved its price, so the pick needs changing |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
@@ -470,7 +480,8 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A broken check never fires** | a tool that failed, or a pick that found nothing (the site moved its price), is `failed` or `broken`, never quiet. Three in a row pause the watch, and you're told how to mend it |
 | **A sign-in wall pauses at once** | an expired login doesn't fix itself before the next look |
 | **A limit per day** | at most `max_per_day` fires (10 unless you say) in any 24 hours; past it, kept and not run, and you're told once |
-| **A message says why it came** | a name alone may not say what is watched, so every message ends with what you asked and where it looks — `(you asked to hear when the number is below 571, looking at google.com/travel/flights · watch 9b904bc4)`. A watch made with no name is named the same way, never after the tool it looks with |
+| **A watch says what it is for** | every message carries your own words and where it looks — `You asked: "keep an eye on the nonstop to Phoenix"` then `(tells you when the fare is below 571; looks at google.com/travel/flights every 6 hours · watch 9b904bc4)`. A watch made with no name is named by its page and line, never after the tool it looks with ([notes/03](notes/03-a-watch-says-what-it-is-for.md)) |
+| **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
 | **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |
@@ -540,11 +551,12 @@ src/prahari/
 │                the known keys named, and applied to a tool's answer
 ├── store.py     the SQLite file: watches (the promise), looks (the receipt),
 │                seen (keys already told), each person's inlet key, mailboxes
-├── watches.py   make, mend, pause, find, a cap per person; preview, which
-│                looks once with nothing granted
+├── watches.py   make, mend, pause, find, a cap per person, one watch per
+│                call and pick; preview, which looks once with nothing
+│                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
 ├── clock.py     the rules above; the loop prahari serve runs; the inlet's
-│                events; firing: a line, or a then-turn with what was found
-│                marked as outside text
+│                events; firing: a line that says what it is for, or a
+│                then-turn with what was found marked as outside text
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
 │                for word), the yes/no for ask, the then-turn (Samay's
 │                direct road); Roads, each watch's look on its own road

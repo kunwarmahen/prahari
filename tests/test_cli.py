@@ -27,7 +27,7 @@ class TestAWatchByHand:
         rc, out, _ = run(tmp_path, capsys, "add", "ALAB under $50", "--check", "web_fetch",
                          "--args", '{"url": "https://x.example"}', "--pick", "number",
                          "--when", "below 50", "--every", "3h")
-        assert rc == 0 and "every 3 hours, looks with web_fetch" in out
+        assert rc == 0 and "every 3 hours, looks at x.example (with web_fetch)" in out
         assert "prahari serve is not running" in out
         watch_id = out.split()[1].rstrip(":")
         rc, out, _ = run(tmp_path, capsys, "list")

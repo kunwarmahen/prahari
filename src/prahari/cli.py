@@ -107,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("add", help="add a watch")
     p.add_argument("name", help="a few words you will know it by")
+    p.add_argument("--asked", default="", metavar="WORDS",
+                   help="what it is for, in your own words (shown with it, and in its "
+                        "messages)")
+    p.add_argument("--thing", default="", metavar="WORDS",
+                   help="what the pick takes: 'the fare', 'the temperature'")
     recipe_flags(p, needed=True)
     p.add_argument("--listen", default="", metavar="WORD",
                    help="hear this word at the inlet instead of looking")
@@ -130,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     recipe_flags(p, needed=False)
     p.add_argument("--name", default=None)
+    p.add_argument("--asked", default=None, metavar="WORDS")
+    p.add_argument("--thing", default=None, metavar="WORDS")
     p.add_argument("--then", default=None)
     p.add_argument("--max-per-day", type=int, default=None, dest="max_per_day")
     p.add_argument("--json", action="store_true", dest="json_out")
@@ -290,7 +297,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
                                every=parts["every"] or ("" if args.listen else "1h"),
                                sample=sample, agent=args.agent, runner=args.runner,
                                owner=args.as_actor or watches.LOCAL_OWNER,
-                               wake=parts["wake"] or "", renew=parts["renew"])
+                               wake=parts["wake"] or "", renew=parts["renew"],
+                               store=store)
         if args.json_out:
             print(json.dumps(said))
         else:
@@ -308,6 +316,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
             pick=parts["pick"], when=parts["when"],
             every=parts["every"] or ("" if args.listen else "1h"),
             wake=parts["wake"] or "", renew=parts["renew"], then=args.then,
+            asked=args.asked, thing=args.thing,
             owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, allow_tools=args.allow_tools, max_per_day=args.max_per_day,
             wait=args.wait, time_limit=args.time_limit,
@@ -426,7 +435,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
     if cmd == "edit":
         parts = _recipe(args)
         changes = {k: v for k, v in parts.items() if v is not None}
-        for key in ("name", "then", "max_per_day"):
+        for key in ("name", "asked", "thing", "then", "max_per_day"):
             if getattr(args, key) is not None:
                 changes[key] = getattr(args, key)
         if args.wake == "":
@@ -699,6 +708,8 @@ def _short(moment: str | None) -> str:
 
 def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
     print(f"{watch.id}  {watch.state:<7} {watch.name}")
+    if watch.asked:
+        print(f"          asked: \"{watch.asked}\"")
     print(f"          {watches.sentence(watch)}")
     print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
           if full or watch.then else "          then: tells you what it saw")

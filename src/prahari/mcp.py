@@ -85,6 +85,15 @@ _RENEW = {"type": "object", "description": (
     '"personal", "topic": "projects/<project>/topics/<name>"}}. Only when the person '
     "has set up that topic.")}
 
+_ASKED = {"type": "string", "description": (
+    "What the person asked for, in their own words, as they said it (\"keep an eye "
+    "on the nonstop to Phoenix and tell me if it gets cheaper\"). Shown first "
+    "wherever the watch is, and in every message it sends.")}
+_THING = {"type": "string", "description": (
+    "What the pick takes, in a few words: \"the fare\", \"the temperature\", "
+    "\"BTC's price\". Messages say \"the fare is now 58\" instead of \"the "
+    "number\".")}
+
 TOOLS: list[dict] = [
     {"name": "preview_watch",
      "description": (
@@ -95,7 +104,7 @@ TOOLS: list[dict] = [
          "create the watch only if they say yes. For a watch that listens at the "
          "inlet, give a sample event instead of a check."),
      "inputSchema": {"type": "object", "properties": {
-         "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
+         "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY, "thing": _THING,
          "listen": {"type": "string", "description": "for an inlet watch instead "
                     "of a check: the one word a sender posts to (whatsapp)"},
          "wake": _WAKE,
@@ -132,7 +141,9 @@ TOOLS: list[dict] = [
          "arguments, as tool(key=value)."),
      "inputSchema": {"type": "object", "properties": {
          "name": {"type": "string", "description": "a few words the person will "
-                  "know it by: \"ALAB under $50\""},
+                  "know it by -- what is watched and the line: \"ALAB under $50\", "
+                  "never the tool's name"},
+         "asked": _ASKED, "thing": _THING,
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "listen": {"type": "string"},
          "wake": _WAKE, "renew": _RENEW,
@@ -141,7 +152,7 @@ TOOLS: list[dict] = [
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200,
                          "description": "the most times it may fire in a day "
                          "(default 10)"}},
-         "required": ["name", "when"]},
+         "required": ["name", "asked", "when"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
     {"name": "update_watch",
      "description": (
@@ -150,6 +161,7 @@ TOOLS: list[dict] = [
          "check, pick, when or every starts its memory over (the next look learns)."),
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "name": {"type": "string"},
+         "asked": _ASKED, "thing": _THING,
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
@@ -220,7 +232,8 @@ class Tools:
                                every=str(args.get("every") or ""),
                                sample=args.get("sample"), agent=self.agent,
                                runner=self.runner, owner=self.person,
-                               wake=str(args.get("wake") or ""), renew=args.get("renew"))
+                               wake=str(args.get("wake") or ""), renew=args.get("renew"),
+                               thing=str(args.get("thing") or ""), store=self.store)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         if said.get("items"):
             lines += ["Items it sees now (first few):", *[f"  {i}" for i in said["items"]]]
@@ -237,7 +250,9 @@ class Tools:
             card = watches.card(watch, self.store)
             last = card["last_look"]
             lines.append(
-                f"{watch.id} [{watch.state}] {watch.name}: {card['sentence']}. "
+                f"{watch.id} [{watch.state}] {watch.name}"
+                + (f" (asked: \"{watch.asked}\")" if watch.asked else "")
+                + f": {card['sentence']}. "
                 f"{card['does']}.\n"
                 + (f"  paused: {watch.paused_because}\n" if watch.paused_because else "")
                 + (f"  last look: {last['outcome']} {last['value']}".rstrip()
@@ -282,8 +297,17 @@ class Tools:
         allow = args.get("allow_tools") or []
         if not isinstance(allow, list):
             raise ToolFailed("allow_tools is a list of tool names")
+        # A WATCH AN AGENT MAKES SAYS WHAT IT IS FOR. The person was not
+        # watching it being written, and later has only these to go by.
+        missing = [k for k in ("name", "asked") if not str(args.get(k) or "").strip()]
+        if missing:
+            raise ToolFailed(
+                f"give {' and '.join(missing)}: name is a few words the person will know "
+                "it by (\"Phoenix nonstop under $571\"), never the tool's name; asked is "
+                "what the person asked for, in their own words")
         made = watches.create(
             self.store, name=str(args.get("name") or ""), check=args.get("check"),
+            asked=str(args.get("asked") or ""), thing=str(args.get("thing") or ""),
             listen=str(args.get("listen") or ""), pick=args.get("pick"),
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
@@ -298,8 +322,9 @@ class Tools:
         return said
 
     def _update_watch(self, args: dict) -> str:
-        changes = {k: args[k] for k in ("name", "check", "pick", "when", "every", "then",
-                                        "max_per_day", "wake", "renew") if k in args}
+        changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
+                                        "every", "then", "max_per_day", "wake", "renew")
+                   if k in args}
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
                                **changes)
         return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch)}."

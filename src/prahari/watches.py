@@ -76,7 +76,8 @@ def _call(raw, what: str) -> dict:
 
 
 def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=None,
-            every: str = "", wake: str = "", renew=None) -> dict:
+            every: str = "", wake: str = "", renew=None, asked: str = "",
+            thing: str = "") -> dict:
     """The recipe's parts, checked together; WatchError in words."""
     try:
         check = recipe._form(check, "check")
@@ -114,25 +115,40 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
     name = " ".join((name or "").split())
     if len(name) > 80:
         raise WatchError("a watch's name is a few words (80 letters at most)")
+    asked = " ".join((asked or "").split())
+    if len(asked) > 300:
+        raise WatchError("asked is what the person said, in a sentence or two "
+                         "(300 letters at most)")
+    thing = " ".join((thing or "").split())
+    if len(thing) > 40:
+        raise WatchError("thing is what the pick takes, in a few words: \"the fare\", "
+                         "\"the temperature\" (40 letters at most)")
     if not name:
         # The person knows a watch by what it looks at and when it tells
         # them, not by the tool it looks with.
-        name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick)} "
+        name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick, thing)} "
                 f"{recipe.when_words(when)}" if check else f"{listen} at the inlet")
         name = name if len(name) <= 80 else name[:79] + "…"
-    return {"name": name, "check": check, "listen": listen, "pick": pick, "when": when,
+    return {"name": name, "asked": asked, "thing": thing,
+            "check": check, "listen": listen, "pick": pick, "when": when,
             "every": every.strip() if check else "", "wake": wake, "renew": renew}
 
 
 def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=None,
            when=None, every: str = "", wake: str = "", renew=None, then: str = "",
-           owner: str = LOCAL_OWNER,
+           asked: str = "", thing: str = "", owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None) -> Watch:
     parts = checked(name=name, check=check, listen=listen, pick=pick, when=when,
-                    every=every, wake=wake, renew=renew)
+                    every=every, wake=wake, renew=renew, asked=asked, thing=thing)
+    twin = same_as(store, owner, parts)
+    if twin is not None:
+        raise WatchError(
+            f"{owner} already has a watch on exactly this: {twin.id} ({twin.name}) -- "
+            f"{sentence(twin)}. Mend that one (its test, how often) instead of making "
+            "a second; ask the person first")
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
     if runner == "dvara":
@@ -170,6 +186,21 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
     return store.add(watch)
 
 
+def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
+    """A watch of this person's that already looks at the same thing the
+    same way: the same call and pick (or the same word at the inlet, heard
+    the same way). ONE THING, ONE WATCH: two watches on one fare, told by
+    two names nobody chose, is how a person stops knowing which is which."""
+    for watch in store.watches(owner=owner):
+        if parts["listen"]:
+            if watch.listen == parts["listen"] and watch.pick == parts["pick"] \
+                    and watch.when == parts["when"]:
+                return watch
+        elif watch.check == parts["check"] and watch.pick == parts["pick"]:
+            return watch
+    return None
+
+
 def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) -> Watch:
     """Mend a watch: its check, pick, test, how often, or what it does.
 
@@ -182,8 +213,8 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     at the sooner of the one already due and now plus the new step.
     """
     watch = find(store, watch_id, owner=owner)
-    allowed = {"name", "check", "pick", "when", "every", "then", "allow_tools",
-               "max_per_day", "wake", "renew"}
+    allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
+               "allow_tools", "max_per_day", "wake", "renew"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
@@ -196,8 +227,10 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         check=given.get("check", watch.check) if not watch.listen else None,
         listen=watch.listen, pick=given.get("pick", watch.pick),
         when=given.get("when", watch.when), every=given.get("every", watch.every),
-        wake=given.get("wake", watch.wake), renew=given.get("renew", watch.renew))
-    fields: dict = {"name": parts["name"], "wake": parts["wake"], "renew": parts["renew"]}
+        wake=given.get("wake", watch.wake), renew=given.get("renew", watch.renew),
+        asked=given.get("asked", watch.asked), thing=given.get("thing", watch.thing))
+    fields: dict = {"name": parts["name"], "asked": parts["asked"], "thing": parts["thing"],
+                    "wake": parts["wake"], "renew": parts["renew"]}
     if "renew" in given:
         fields["renew_at"] = iso(now_utc()) if parts["renew"] else None
     if recipe_keys & set(given):
@@ -275,7 +308,8 @@ def find(store: Store, watch_id: str, owner: str | None = None) -> Watch:
 
 
 def sentence(watch: Watch) -> str:
-    said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every)
+    said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every,
+                           watch.thing)
     return said + push_words(watch.wake, watch.renew)
 
 
@@ -310,7 +344,8 @@ RESULT_SHOWN = 1500
 
 def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
             every: str = "", sample=None, agent: str = "", runner: str = "direct",
-            owner: str = LOCAL_OWNER, wake: str = "", renew=None) -> dict:
+            owner: str = LOCAL_OWNER, wake: str = "", renew=None, thing: str = "",
+            store: Store | None = None) -> dict:
     """Try a recipe ONCE, before anybody said yes: look (only with a tool
     that reads -- nothing is granted yet), pick, and say what it saw.
 
@@ -322,11 +357,21 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
     import json as _json
 
     parts = checked(check=check, listen=listen, pick=pick, when=when, every=every,
-                    wake=wake, renew=renew)
+                    wake=wake, renew=renew, thing=thing)
     out: dict = {"sentence": recipe.sentence(parts["check"], parts["listen"],
-                                             parts["pick"], parts["when"], parts["every"])
+                                             parts["pick"], parts["when"], parts["every"],
+                                             parts["thing"])
                  + push_words(parts["wake"], parts["renew"]),
                  "looked": False}
+    twin = same_as(store, owner, parts) if store is not None else None
+    if twin is not None:
+        # Said before anything is looked at: the person is asked about the
+        # watch they have, not a second one.
+        out["twin"] = twin.id
+        out["said"] = (f"{owner} already has a watch on exactly this: {twin.id} "
+                       f"({twin.name}) -- {sentence(twin)}. Offer to mend that one "
+                       "instead of making a second.")
+        return out
     if parts["listen"]:
         if sample is None:
             out["said"] = ("Nothing to try it on yet: give a sample of what the sender "

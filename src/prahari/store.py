@@ -78,6 +78,13 @@ class Watch:
     owner: str
     #: A few words a person knows it by ("ALAB under $50").
     name: str
+    #: What the person asked for, in their own words ("tell me if the
+    #: nonstop to Phoenix gets cheaper"): what the watch is FOR, said
+    #: first wherever it is shown.
+    asked: str = ""
+    #: What the pick takes, in a few words ("the fare", "the temperature"),
+    #: so a message says "the fare is now 58", not "the number".
+    thing: str = ""
     #: One tool call that reads: {"tool": NAME, "args": {...}}. Empty for
     #: a watch that listens at the inlet instead.
     check: dict = field(default_factory=dict)
@@ -180,7 +187,9 @@ CREATE TABLE IF NOT EXISTS watch (
     armed INTEGER NOT NULL,
     wake TEXT NOT NULL DEFAULT '',
     renew TEXT NOT NULL DEFAULT '{}',
-    renew_at TEXT
+    renew_at TEXT,
+    asked TEXT NOT NULL DEFAULT '',
+    thing TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
@@ -232,7 +241,9 @@ CREATE TABLE IF NOT EXISTS mailbox (
 #: Columns a file made before them lacks, added on open: (name, SQL type).
 _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("renew", "TEXT NOT NULL DEFAULT '{}'"),
-                    ("renew_at", "TEXT")),
+                    ("renew_at", "TEXT"),
+                    ("asked", "TEXT NOT NULL DEFAULT ''"),
+                    ("thing", "TEXT NOT NULL DEFAULT ''")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
 
 
