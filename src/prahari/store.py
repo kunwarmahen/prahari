@@ -52,7 +52,7 @@ OUTCOMES = ("learned", "quiet", "fired", "limited", "broken", "failed",
 TROUBLE = ("broken", "failed")
 
 RUNNERS = ("direct", "dvara")
-STATES = ("active", "paused")
+STATES = ("active", "paused", "ended")
 
 #: A then-turn's answer is kept, but not without limit.
 REPLY_CAP = 20_000
@@ -125,6 +125,19 @@ class Watch:
     #: days -- made when the watch starts and once a day: {"tool", "args"}.
     renew: dict = field(default_factory=dict)
     renew_at: str | None = None
+    #: When it starts looking (or hearing), and when it stops by itself:
+    #: "until Saturday", "from tomorrow morning". None for now and never.
+    starts: str | None = None
+    ends: str | None = None
+    #: A test on what it picks that ends it ("contains Landed"): the thing
+    #: watched is over. {} for none.
+    stop: dict = field(default_factory=dict)
+    #: When it ended (state "ended"): kept ENDED_KEPT, then removed.
+    ended_at: str | None = None
+    #: When the person last said to keep an open-ended watch (None: since
+    #: it was made), and when it last asked them whether to.
+    kept_at: str | None = None
+    still_asked_at: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -156,7 +169,7 @@ class Look:
         return asdict(self)
 
 
-_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew"}
+_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew", "stop"}
 _BOOL_COLUMNS = {"looked", "armed", "notified", "tls"}
 
 _SCHEMA = """
@@ -189,7 +202,13 @@ CREATE TABLE IF NOT EXISTS watch (
     renew TEXT NOT NULL DEFAULT '{}',
     renew_at TEXT,
     asked TEXT NOT NULL DEFAULT '',
-    thing TEXT NOT NULL DEFAULT ''
+    thing TEXT NOT NULL DEFAULT '',
+    starts TEXT,
+    ends TEXT,
+    stop TEXT NOT NULL DEFAULT '{}',
+    ended_at TEXT,
+    kept_at TEXT,
+    still_asked_at TEXT
 );
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
@@ -243,7 +262,10 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("renew", "TEXT NOT NULL DEFAULT '{}'"),
                     ("renew_at", "TEXT"),
                     ("asked", "TEXT NOT NULL DEFAULT ''"),
-                    ("thing", "TEXT NOT NULL DEFAULT ''")),
+                    ("thing", "TEXT NOT NULL DEFAULT ''"),
+                    ("starts", "TEXT"), ("ends", "TEXT"),
+                    ("stop", "TEXT NOT NULL DEFAULT '{}'"), ("ended_at", "TEXT"),
+                    ("kept_at", "TEXT"), ("still_asked_at", "TEXT")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
 
 

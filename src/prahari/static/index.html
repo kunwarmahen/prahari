@@ -249,6 +249,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
           ${w.wake ? `<span class="tag listen">woken by: ${esc(w.wake)}</span>` : ""}
           ${w.owner !== "local" ? `<span class="tag">for ${esc(w.owner)}</span>` : ""}
           ${w.state === "paused" ? `<span class="tag paused">paused</span>` : ""}
+          ${w.state === "ended" ? `<span class="tag paused">ended</span>` : ""}
           ${w.fired_today ? `<span class="tag">fired ${w.fired_today}× today</span>` : ""}</div>
         ${w.asked ? `<div class="asked">You asked: “${esc(w.asked)}”</div>` : ""}
         <div class="says">${esc(w.sentence)}. ${esc(w.does)}.</div>

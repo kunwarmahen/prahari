@@ -39,6 +39,19 @@ class TestAWatchByHand:
         rc, out, _ = run(tmp_path, capsys, "rm", watch_id)
         assert rc == 0 and run(tmp_path, capsys, "list")[1].startswith("no watches")
 
+    def test_until_stop_and_keep_by_hand(self, tmp_path, capsys):
+        rc, out, _ = run(tmp_path, capsys, "add", "AA 1042 lands", "--check", "web_fetch",
+                         "--args", '{"url": "https://x.example/aa1042"}', "--pick",
+                         "text:Status: (\\w+)", "--when", "changed", "--every", "30m",
+                         "--from", "2099-01-01T07:00", "--until", "2099-01-02T00:00",
+                         "--stop", "contains Landed")
+        assert rc == 0, out
+        assert "; from Thu 1 Jan 07:00; until Fri 2 Jan 00:00; stops once the text " \
+               "says 'Landed'" in out
+        watch_id = out.split()[1].rstrip(":")
+        rc, out, _ = run(tmp_path, capsys, "edit", watch_id, "--until", "", "--keep")
+        assert rc == 0 and "until" not in out and "stops once" in out
+
     def test_a_mistake_exits_2_in_words(self, tmp_path, capsys):
         rc, _, err = run(tmp_path, capsys, "add", "x", "--check", "t", "--when",
                          "belw 50")

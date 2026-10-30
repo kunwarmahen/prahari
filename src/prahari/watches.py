@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from prahari import recipe
 from prahari.store import RUNNERS, Store, Watch, from_iso, iso, now_utc
@@ -48,6 +48,27 @@ _WORD = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 class WatchError(ValueError):
     """A watch that cannot be made or changed, said in words."""
+
+
+def moment(raw, what: str) -> str | None:
+    """A start or an end, as ISO in UTC; None for none. ISO 8601 with the
+    person's offset ("2026-10-31T23:59-04:00"); without one, it is this
+    computer's own clock (the house's, for a time typed here)."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        raise WatchError(f"{what} is a date and time like 2026-10-31T23:59-04:00 "
+                         f"(with the person's offset), not {text!r}") from None
+    return iso(when if when.tzinfo else when.astimezone())
+
+
+def shown_at(stamp: str | None) -> str:
+    """A start or end the way a person reads it, on this computer's clock."""
+    when = from_iso(stamp)
+    return "" if when is None else f"{when.astimezone():%a %-d %b %H:%M}"
 
 
 def max_watches() -> int:
@@ -77,7 +98,7 @@ def _call(raw, what: str) -> dict:
 
 def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=None,
             every: str = "", wake: str = "", renew=None, asked: str = "",
-            thing: str = "") -> dict:
+            thing: str = "", starts=None, ends=None, stop=None) -> dict:
     """The recipe's parts, checked together; WatchError in words."""
     try:
         check = recipe._form(check, "check")
@@ -110,6 +131,10 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
                                  "listens hears its word already")
         pick = recipe.check_pick(pick)
         when = recipe.check_when((when or {"any": True}) if listen else when, pick)
+        stop = recipe.check_when(stop, pick) if stop else {}
+        if stop and recipe.test_of(stop) not in recipe.EDGED:
+            raise WatchError("stop is a test on what it sees now -- below, above, "
+                             "contains, equals ... -- like {\"contains\": \"Landed\"}")
     except recipe.RecipeError as exc:
         raise WatchError(str(exc)) from None
     name = " ".join((name or "").split())
@@ -129,20 +154,28 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
         name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick, thing)} "
                 f"{recipe.when_words(when)}" if check else f"{listen} at the inlet")
         name = name if len(name) <= 80 else name[:79] + "…"
-    return {"name": name, "asked": asked, "thing": thing,
+    starts, ends = moment(starts, "starts"), moment(ends, "ends")
+    if starts and ends and from_iso(ends) <= from_iso(starts):
+        raise WatchError("ends comes after starts")
+    return {"name": name, "asked": asked, "thing": thing, "starts": starts, "ends": ends,
+            "stop": stop,
             "check": check, "listen": listen, "pick": pick, "when": when,
             "every": every.strip() if check else "", "wake": wake, "renew": renew}
 
 
 def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=None,
            when=None, every: str = "", wake: str = "", renew=None, then: str = "",
-           asked: str = "", thing: str = "", owner: str = LOCAL_OWNER,
+           asked: str = "", thing: str = "", starts=None, ends=None, stop=None,
+           owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None) -> Watch:
     parts = checked(name=name, check=check, listen=listen, pick=pick, when=when,
-                    every=every, wake=wake, renew=renew, asked=asked, thing=thing)
+                    every=every, wake=wake, renew=renew, asked=asked, thing=thing,
+                    starts=starts, ends=ends, stop=stop)
+    if parts["ends"] and from_iso(parts["ends"]) <= now_utc():
+        raise WatchError(f"ends ({shown_at(parts['ends'])}) has already passed")
     twin = same_as(store, owner, parts)
     if twin is not None:
         raise WatchError(
@@ -180,10 +213,32 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
         # An event is news by being sent: there is nothing to learn first.
         watch.looked = True
     else:
-        watch.next_at = iso(now_utc())      # the first look, soon: it learns
+        # the first look, soon (it learns) -- or when it starts
+        watch.next_at = parts["starts"] or iso(now_utc())
     if parts["renew"]:
         watch.renew_at = iso(now_utc())     # the sender is asked to start knocking
     return store.add(watch)
+
+
+def _passed(stamp: str | None) -> bool:
+    when = from_iso(stamp)
+    return when is not None and when <= now_utc()
+
+
+def span_words(watch: Watch) -> str:
+    """When it looks, and when it stops by itself, in words."""
+    said = ""
+    start = from_iso(watch.starts)
+    if start is not None and start > now_utc():
+        said += f"; from {shown_at(watch.starts)}"
+    if watch.ends:
+        said += f"; until {shown_at(watch.ends)}"
+    if watch.stop:
+        said += (f"; stops once {recipe.thing_words(watch.pick, watch.thing)} "
+                 f"{recipe.when_words(watch.stop)}")
+    if watch.state == "ended":
+        said += f"; ended {shown_at(watch.ended_at)}"
+    return said
 
 
 def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
@@ -192,6 +247,8 @@ def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
     the same way). ONE THING, ONE WATCH: two watches on one fare, told by
     two names nobody chose, is how a person stops knowing which is which."""
     for watch in store.watches(owner=owner):
+        if watch.state == "ended":
+            continue
         if parts["listen"]:
             if watch.listen == parts["listen"] and watch.pick == parts["pick"] \
                     and watch.when == parts["when"]:
@@ -211,10 +268,15 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     HOW OFTEN IS NOT THE RECIPE. ``every`` alone changes when it looks, not
     what it looks for: what it remembered stays, and the next look comes
     at the sooner of the one already due and now plus the new step.
+
+    KEEP IS ONE WORD FOR GOING ON. ``keep`` stops the 30-day question for
+    another 30 days, and brings an ended watch back (its old end, passed,
+    is dropped); so does a new ``ends`` or ``starts`` for an ended one.
     """
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
-               "allow_tools", "max_per_day", "wake", "renew"}
+               "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
+               "keep"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
@@ -228,9 +290,23 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         listen=watch.listen, pick=given.get("pick", watch.pick),
         when=given.get("when", watch.when), every=given.get("every", watch.every),
         wake=given.get("wake", watch.wake), renew=given.get("renew", watch.renew),
-        asked=given.get("asked", watch.asked), thing=given.get("thing", watch.thing))
+        asked=given.get("asked", watch.asked), thing=given.get("thing", watch.thing),
+        starts=given.get("starts", watch.starts),
+        ends=given.get("ends", watch.ends) if not (given.get("keep") and "ends" not in given
+                                                   and _passed(watch.ends)) else None,
+        stop=given.get("stop", watch.stop))
+    if "ends" in given and _passed(parts["ends"]):
+        raise WatchError(f"ends ({shown_at(parts['ends'])}) has already passed")
     fields: dict = {"name": parts["name"], "asked": parts["asked"], "thing": parts["thing"],
-                    "wake": parts["wake"], "renew": parts["renew"]}
+                    "wake": parts["wake"], "renew": parts["renew"], "starts": parts["starts"],
+                    "ends": parts["ends"], "stop": parts["stop"]}
+    if given.get("keep"):
+        fields.update(kept_at=iso(now_utc()), still_asked_at=None)
+    if watch.state == "ended" and {"keep", "ends", "starts"} & set(given):
+        fields.update(state="active", ended_at=None, paused_because="",
+                      kept_at=iso(now_utc()), still_asked_at=None)
+        if not watch.listen:
+            fields["next_at"] = iso(now_utc())
     if "renew" in given:
         fields["renew_at"] = iso(now_utc()) if parts["renew"] else None
     if recipe_keys & set(given):
@@ -257,6 +333,11 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         if not 1 <= int(given["max_per_day"]) <= 200:
             raise WatchError("max_per_day is between 1 and 200")
         fields["max_per_day"] = int(given["max_per_day"])
+    if "starts" in given and not watch.listen and fields.get("state", watch.state) == "active":
+        fields.setdefault("next_at", iso(now_utc()))
+    start = from_iso(parts["starts"])
+    if start is not None and start > now_utc() and "next_at" in fields:
+        fields["next_at"] = parts["starts"]     # nothing is looked at before it starts
     store.update(watch.id, **fields)
     if recipe_keys & set(given):
         store.forget_seen(watch.id)
@@ -272,6 +353,8 @@ def pause(store: Store, watch_id: str, owner: str | None = None,
 
 def resume(store: Store, watch_id: str, owner: str | None = None) -> Watch:
     watch = find(store, watch_id, owner=owner)
+    if watch.state == "ended":
+        return update(store, watch.id, owner=owner, keep=True)
     store.update(watch.id, state="active", paused_because="", trouble=0,
                  next_at=None if watch.listen else iso(now_utc()))
     return store.get(watch.id)
@@ -310,7 +393,7 @@ def find(store: Store, watch_id: str, owner: str | None = None) -> Watch:
 def sentence(watch: Watch) -> str:
     said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every,
                            watch.thing)
-    return said + push_words(watch.wake, watch.renew)
+    return said + push_words(watch.wake, watch.renew) + span_words(watch)
 
 
 def push_words(wake: str, renew: dict | None) -> str:
@@ -345,7 +428,7 @@ RESULT_SHOWN = 1500
 def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
             every: str = "", sample=None, agent: str = "", runner: str = "direct",
             owner: str = LOCAL_OWNER, wake: str = "", renew=None, thing: str = "",
-            store: Store | None = None) -> dict:
+            starts=None, ends=None, stop=None, store: Store | None = None) -> dict:
     """Try a recipe ONCE, before anybody said yes: look (only with a tool
     that reads -- nothing is granted yet), pick, and say what it saw.
 
@@ -357,11 +440,13 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
     import json as _json
 
     parts = checked(check=check, listen=listen, pick=pick, when=when, every=every,
-                    wake=wake, renew=renew, thing=thing)
+                    wake=wake, renew=renew, thing=thing, starts=starts, ends=ends, stop=stop)
+    span = Watch(id="", owner=owner, name="", pick=parts["pick"], thing=parts["thing"],
+                 starts=parts["starts"], ends=parts["ends"], stop=parts["stop"])
     out: dict = {"sentence": recipe.sentence(parts["check"], parts["listen"],
                                              parts["pick"], parts["when"], parts["every"],
                                              parts["thing"])
-                 + push_words(parts["wake"], parts["renew"]),
+                 + push_words(parts["wake"], parts["renew"]) + span_words(span),
                  "looked": False}
     twin = same_as(store, owner, parts) if store is not None else None
     if twin is not None:

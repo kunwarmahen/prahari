@@ -66,6 +66,11 @@ from prahari import recipe
 from prahari.looking import Asker, Called, Caller, TurnResult
 from prahari.store import Look, Store, Watch, from_iso, iso, now_utc
 
+#: An ended watch is kept this long, then removed with its looks.
+ENDED_KEPT = timedelta(days=30)
+#: A watch with no end asks whether it is still wanted after this long.
+STILL_AFTER = timedelta(days=30)
+
 #: Broken or failed looks in a row before a watch pauses itself.
 MAX_TROUBLE = 3
 #: The longest the clock sleeps, so a watch added elsewhere is noticed.
@@ -127,6 +132,7 @@ class Clock:
     def sleep_for(self) -> float:
         upcoming = [from_iso(w.next_at) for w in self.store.watches(state="active")
                     if w.next_at and not w.listen]
+        upcoming += [from_iso(w.ends) for w in self.store.watches(state="active") if w.ends]
         upcoming += [from_iso(w.renew_at) for w in self.store.watches(state="active")
                      if w.renew and w.renew_at]
         if not upcoming:
@@ -135,8 +141,11 @@ class Clock:
 
     def tick(self) -> list[Future]:
         now = self.now()
+        self.calendar(now)
         started = []
         for watch in self.store.watches(state="active"):
+            if not _started(watch, now):
+                continue
             renew = from_iso(watch.renew_at)
             if watch.renew and renew is not None and renew <= now:
                 self.store.update(watch.id, renew_at=iso(now + RENEW_EVERY))
@@ -147,6 +156,49 @@ class Clock:
             self._claim(watch, now)
             started.append(self._submit(watch, "clock"))
         return started
+
+    def calendar(self, now: datetime) -> None:
+        """A watch's days, kept with no model: one whose end came ends and
+        says so; one with no end asks, once a month, whether it's still
+        wanted; one ended long enough ago is removed.
+
+        ENDING NEEDS NO YES. The person agreed to the end when they agreed
+        to the watch, and a watch that stops looking can do no harm; going
+        on is one word from them (keep). The message says which."""
+        for watch in self.store.watches(state="active"):
+            ends = from_iso(watch.ends)
+            if ends is not None and ends <= now:
+                self._end(watch, f"Its end came ({_at(watch.ends)}), as was set.")
+            elif ends is None and not watch.stop:
+                self._still(watch, now)
+        for watch in self.store.watches(state="ended"):
+            ended = from_iso(watch.ended_at)
+            if ended is not None and ended + ENDED_KEPT <= now:
+                self.store.delete(watch.id)
+
+    def _end(self, watch: Watch, why: str) -> None:
+        current = self.store.get(watch.id)
+        if current is None or current.state != "active":
+            return
+        self.store.update(watch.id, state="ended", ended_at=iso(self.now()), next_at=None)
+        self._send(watch, "\n".join([
+            f"Ended: {watch.name}", why,
+            *([f'You asked: "{watch.asked}"'] if watch.asked else []),
+            f"It looks no more. It's kept {ENDED_KEPT.days} days, then removed; to keep "
+            f"it going, ask me to keep watching (prahari edit {watch.id} --keep)."]))
+
+    def _still(self, watch: Watch, now: datetime) -> None:
+        since = from_iso(watch.kept_at) or from_iso(watch.created_at)
+        asked = from_iso(watch.still_asked_at)
+        if since is None or since + STILL_AFTER > now or (asked and asked >= since):
+            return
+        self.store.update(watch.id, still_asked_at=iso(now))
+        self._send(watch, "\n".join([
+            f"Still want this? {watch.name}",
+            *([f'You asked: "{watch.asked}"'] if watch.asked else []),
+            f"It has been watching since {_at(iso(since))}, with no end set. It goes on "
+            "looking; ask me to remove it, or to keep it, and I won't ask again for "
+            f"{STILL_AFTER.days} days (prahari edit {watch.id} --keep)."]))
 
     def look_now(self, watch_id: str) -> Look:
         """One look at once, here, waited for (``prahari look``)."""
@@ -196,7 +248,8 @@ class Clock:
         """A knock on a watch's ``wake``: look now. Already looking, it
         looks once more when it is done. False if it can't (gone, paused)."""
         watch = self.store.get(watch_id)
-        if watch is None or watch.state != "active" or not watch.check:
+        if watch is None or watch.state != "active" or not watch.check \
+                or not _started(watch, self.now()):
             return False
         with self._lock:
             if watch.id in self._looking:
@@ -223,6 +276,8 @@ class Clock:
         whose = self.people(owners)
         for watch in self.store.watches(state="active", listen=source):
             if whose is not None and watch.owner not in whose:
+                continue
+            if not _started(watch, self.now()):
                 continue
             key = f"event:{ident}"
             if not self.store.unseen(watch.id, [key]):
@@ -307,6 +362,20 @@ class Clock:
 
     def _decide(self, watch: Watch, look: Look, text: str, inlet: bool = False,
                 heard: str = "") -> bool:
+        """What the check said, decided -- and then whether the thing
+        watched is over (``stop``): a flight that landed ends its watch,
+        after what it saw is told."""
+        fired = self._judge(watch, look, text, inlet=inlet, heard=heard)
+        if watch.stop:
+            picked = recipe.apply(watch.pick, text)
+            if picked.found and recipe.holds(watch.stop, picked):
+                self._end(watch, f"{_thing(watch).capitalize()} is {picked.shown()}: "
+                                 f"what you said would end it "
+                                 f"({recipe.when_words(watch.stop)}).")
+        return fired
+
+    def _judge(self, watch: Watch, look: Look, text: str, inlet: bool = False,
+               heard: str = "") -> bool:
         """What the check (or the event) said, decided. True if it fired.
         ``heard``: an inlet event in a line, which is what is told."""
         picked = recipe.apply(watch.pick, text)
@@ -542,6 +611,16 @@ def _heard(body: dict) -> str:
             parts.append(f"{key}: {' '.join(str(value).split())}")
     line = " · ".join(parts) or json.dumps(body, ensure_ascii=False)
     return line if len(line) <= 500 else line[:499] + "…"
+
+
+def _started(watch: Watch, now: datetime) -> bool:
+    start = from_iso(watch.starts)
+    return start is None or start <= now
+
+
+def _at(stamp: str | None) -> str:
+    when = from_iso(stamp)
+    return "" if when is None else f"{when.astimezone():%a %-d %b %H:%M}"
 
 
 def _thing(watch: Watch) -> str:

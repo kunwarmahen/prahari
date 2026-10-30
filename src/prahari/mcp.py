@@ -85,6 +85,17 @@ _RENEW = {"type": "object", "description": (
     '"personal", "topic": "projects/<project>/topics/<name>"}}. Only when the person '
     "has set up that topic.")}
 
+_STARTS = {"type": "string", "description": (
+    "When it starts looking, if not now: ISO 8601 with the person's offset "
+    "(\"2026-10-31T07:00-04:00\"). \"Keep an eye on my flight tomorrow\" starts "
+    "tomorrow morning.")}
+_ENDS = {"type": "string", "description": (
+    "When it ends by itself, if the thing has a day after which it no longer "
+    "matters: ISO 8601 with the person's offset. A fare for Saturday's flight ends "
+    "after Saturday. It stops looking and tells the person; nobody is asked.")}
+_STOP = {"type": "object", "description": (
+    "Ends it once what it sees passes this test, same form as when: "
+    "{\"contains\": \"Landed\"} for a flight's status. Leave out otherwise.")}
 _ASKED = {"type": "string", "description": (
     "What the person asked for, in their own words, as they said it (\"keep an eye "
     "on the nonstop to Phoenix and tell me if it gets cheaper\"). Shown first "
@@ -105,6 +116,7 @@ TOOLS: list[dict] = [
          "inlet, give a sample event instead of a check."),
      "inputSchema": {"type": "object", "properties": {
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY, "thing": _THING,
+         "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "listen": {"type": "string", "description": "for an inlet watch instead "
                     "of a check: the one word a sender posts to (whatsapp)"},
          "wake": _WAKE,
@@ -144,6 +156,7 @@ TOOLS: list[dict] = [
                   "know it by -- what is watched and the line: \"ALAB under $50\", "
                   "never the tool's name"},
          "asked": _ASKED, "thing": _THING,
+         "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "listen": {"type": "string"},
          "wake": _WAKE, "renew": _RENEW,
@@ -158,10 +171,16 @@ TOOLS: list[dict] = [
      "description": (
          "Mend one of the person's watches -- most often after it paused because its "
          "pick found nothing (a site changed): preview a new pick first. Changing the "
-         "check, pick, when or every starts its memory over (the next look learns)."),
+         "check, pick, when or every starts its memory over (the next look learns). "
+         "When the person says to keep a watch that ended or asked whether it's still "
+         "wanted, give keep: true (and a new ends, if they say one)."),
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "name": {"type": "string"},
          "asked": _ASKED, "thing": _THING,
+         "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
+         "keep": {"type": "boolean", "description": (
+             "true when the person says to keep it: an ended watch looks again, and "
+             "one with no end stops asking whether it's wanted for 30 days")},
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
@@ -233,7 +252,9 @@ class Tools:
                                sample=args.get("sample"), agent=self.agent,
                                runner=self.runner, owner=self.person,
                                wake=str(args.get("wake") or ""), renew=args.get("renew"),
-                               thing=str(args.get("thing") or ""), store=self.store)
+                               thing=str(args.get("thing") or ""),
+                               starts=args.get("starts"), ends=args.get("ends"),
+                               stop=args.get("stop"), store=self.store)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         if said.get("items"):
             lines += ["Items it sees now (first few):", *[f"  {i}" for i in said["items"]]]
@@ -308,6 +329,7 @@ class Tools:
         made = watches.create(
             self.store, name=str(args.get("name") or ""), check=args.get("check"),
             asked=str(args.get("asked") or ""), thing=str(args.get("thing") or ""),
+            starts=args.get("starts"), ends=args.get("ends"), stop=args.get("stop"),
             listen=str(args.get("listen") or ""), pick=args.get("pick"),
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
@@ -323,7 +345,8 @@ class Tools:
 
     def _update_watch(self, args: dict) -> str:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
-                                        "every", "then", "max_per_day", "wake", "renew")
+                                        "every", "then", "max_per_day", "wake", "renew",
+                                        "starts", "ends", "stop", "keep")
                    if k in args}
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
                                **changes)

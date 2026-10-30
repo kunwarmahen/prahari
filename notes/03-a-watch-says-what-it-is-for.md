@@ -103,6 +103,9 @@ You asked: "tell me if bitcoin is under 200 thousand dollars"
 (tells you when BTC's price is below 200,000; looks at api.coinbase.com/v2/prices every hour · watch d14a1709)
 ```
 
+When a watch begins and when it is over — a fare after Saturday, a
+flight once it lands — is [note 04](04-a-watch-has-its-days.md).
+
 ## What was deliberately not built
 
 * **Renaming old watches.** A watch made before keeps its name and has

@@ -94,6 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
                             "start and once a day (Gmail's watch_mailbox)")
         p.add_argument("--renew-args", default=None, metavar="JSON", dest="renew_args",
                        help="its arguments, one JSON object")
+        p.add_argument("--from", default=None, dest="starts", metavar="WHEN",
+                       help="start looking then: 2026-10-31T07:00 (this computer's "
+                            "clock) or with an offset ('' for now)")
+        p.add_argument("--until", default=None, dest="ends", metavar="WHEN",
+                       help="end by itself then ('' for never)")
+        p.add_argument("--stop", default=None, metavar="TEST",
+                       help="end once what it sees passes this test: 'contains Landed', "
+                            "'below 100' (same words as --when)")
 
     p = sub.add_parser("preview", help="try a recipe once, and say what it sees")
     recipe_flags(p, needed=True)
@@ -138,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--asked", default=None, metavar="WORDS")
     p.add_argument("--thing", default=None, metavar="WORDS")
     p.add_argument("--then", default=None)
+    p.add_argument("--keep", action="store_true", default=None,
+                   help="keep it going: an ended watch looks again, and an open-ended "
+                        "one stops asking for 30 days")
     p.add_argument("--max-per-day", type=int, default=None, dest="max_per_day")
     p.add_argument("--json", action="store_true", dest="json_out")
 
@@ -278,8 +289,11 @@ def _recipe(args, pick_default=None) -> dict:
             raise watches.WatchError(f"--renew-args is not JSON: {exc}") from None
     elif args.renew_args:
         raise watches.WatchError("--renew-args goes with --renew TOOL")
+    stop = (recipe.when_from_text(args.stop, pick or {}) if args.stop else
+            ({} if args.stop == "" else None))
     return {"check": check, "pick": pick, "when": when, "every": args.every,
-            "wake": args.wake, "renew": renew}
+            "wake": args.wake, "renew": renew, "starts": args.starts, "ends": args.ends,
+            "stop": stop}
 
 
 def _dispatch(args, store: Store, state: Path) -> int:
@@ -298,7 +312,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
                                sample=sample, agent=args.agent, runner=args.runner,
                                owner=args.as_actor or watches.LOCAL_OWNER,
                                wake=parts["wake"] or "", renew=parts["renew"],
-                               store=store)
+                               starts=parts["starts"], ends=parts["ends"],
+                               stop=parts["stop"], store=store)
         if args.json_out:
             print(json.dumps(said))
         else:
@@ -316,8 +331,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
             pick=parts["pick"], when=parts["when"],
             every=parts["every"] or ("" if args.listen else "1h"),
             wake=parts["wake"] or "", renew=parts["renew"], then=args.then,
-            asked=args.asked, thing=args.thing,
-            owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
+            asked=args.asked, thing=args.thing, starts=parts["starts"], ends=parts["ends"],
+            stop=parts["stop"], owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, allow_tools=args.allow_tools, max_per_day=args.max_per_day,
             wait=args.wait, time_limit=args.time_limit,
             dvara=_dvara() if args.runner == "dvara" else None)
@@ -435,7 +450,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
     if cmd == "edit":
         parts = _recipe(args)
         changes = {k: v for k, v in parts.items() if v is not None}
-        for key in ("name", "asked", "thing", "then", "max_per_day"):
+        for key in ("name", "asked", "thing", "then", "max_per_day", "keep"):
             if getattr(args, key) is not None:
                 changes[key] = getattr(args, key)
         if args.wake == "":

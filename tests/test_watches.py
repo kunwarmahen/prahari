@@ -70,6 +70,18 @@ class TestMadeWhole:
         assert mail.name == ("mcp__gmail__search_threads for 'from:bank': the list has "
                              "something new")
 
+    def test_a_start_and_an_end_are_checked(self, store):
+        with pytest.raises(WatchError, match="has already passed"):
+            make(store, ends="2020-01-01T00:00+00:00")
+        with pytest.raises(WatchError, match="ends comes after starts"):
+            make(store, starts="2099-01-02T00:00+00:00", ends="2099-01-01T00:00+00:00")
+        with pytest.raises(WatchError, match="like 2026-10-31T23:59-04:00"):
+            make(store, ends="Saturday")
+        with pytest.raises(WatchError, match="a test on what it sees now"):
+            make(store, stop={"changed": True})
+        watch = make(store, ends="2099-01-01T12:00-05:00")
+        assert watch.ends == "2099-01-01T17:00:00+00:00"   # kept in UTC
+
     def test_a_new_watch_looks_soon(self, store):
         watch = make(store)
         assert watch.next_at and not watch.looked and watch.armed

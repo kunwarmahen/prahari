@@ -74,7 +74,8 @@ nothing from Yantra and has no dependencies of its own.
 
 How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no-model.md);
 [02 — a watch for everyone, mail that knocks, and a door to the street](notes/02-a-watch-for-everyone.md);
-[03 — a watch says what it is for](notes/03-a-watch-says-what-it-is-for.md).
+[03 — a watch says what it is for](notes/03-a-watch-says-what-it-is-for.md);
+[04 — a watch has its days](notes/04-a-watch-has-its-days.md).
 
 ## Works with
 
@@ -236,6 +237,29 @@ ends every message it sends. `--thing` names the number ("the fare",
 "the temperature"), so a message says *the fare is now 58* instead of
 *the number is now 58*. An agent must give a name and `asked`; by hand
 both are yours to leave out.
+
+**from**, **until** and **stop** — a watch's days. `--from` is when it
+starts looking (before then it makes no look); `--until` is when it ends
+by itself; `--stop` ends it once what it sees passes a test, in the same
+words as `--when` (`contains Landed`). An ended watch tells you, looks no
+more, and is kept 30 days, then removed with its looks; `prahari edit ID
+--keep` (or *keep it* to the agent) brings it back. A watch with none of
+these asks you once, after 30 days, whether you still want it — it goes
+on looking — and `--keep` stops the question for another 30. Nothing
+here asks first: you agreed to the end when you agreed to the watch.
+
+```bash
+# the fare for Saturday's flight: no use after Saturday
+prahari add "Phoenix nonstop under $571" --check browser_open \
+    --args '{"url": "https://www.google.com/travel/flights?..."}' \
+    --pick 'number:Nonstop.*?\$([\d,]+)' --when 'below 571' --every 6h \
+    --thing "the fare" --until 2026-10-31T23:59
+
+# a flight tomorrow: from the morning until it lands
+prahari add "AA 1042 tomorrow" --check web_fetch --args '{"url": "https://..."}' \
+    --pick 'text:Status: (\w+)' --when changed --every 30m \
+    --from 2026-10-31T06:00 --until 2026-11-01T00:00 --stop 'contains Landed'
+```
 
 **then** — what the agent is asked when it fires, with nobody watching.
 Leave it out, and you get a line saying what was seen, with no model
@@ -451,7 +475,7 @@ prahari mcp --for local --agent ~/agents/reader     # what a harness starts
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
 | `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first |
-| `update_watch` | mends one: a site moved its price, so the pick needs changing |
+| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 
@@ -481,6 +505,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A sign-in wall pauses at once** | an expired login doesn't fix itself before the next look |
 | **A limit per day** | at most `max_per_day` fires (10 unless you say) in any 24 hours; past it, kept and not run, and you're told once |
 | **A watch says what it is for** | every message carries your own words and where it looks — `You asked: "keep an eye on the nonstop to Phoenix"` then `(tells you when the fare is below 571; looks at google.com/travel/flights every 6 hours · watch 9b904bc4)`. A watch made with no name is named by its page and line, never after the tool it looks with ([notes/03](notes/03-a-watch-says-what-it-is-for.md)) |
+| **A watch has its days** | `starts`, `ends` and `stop` (a flight that landed): nothing is looked at before it starts, and one whose end came ends and says so, with no yes asked — it was agreed with the watch. Ended, it's kept 30 days, then removed; with no end at all, it asks once a month whether it's still wanted ([notes/04](notes/04-a-watch-has-its-days.md)) |
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
@@ -554,7 +579,8 @@ src/prahari/
 ├── watches.py   make, mend, pause, find, a cap per person, one watch per
 │                call and pick; preview, which looks once with nothing
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
-├── clock.py     the rules above; the loop prahari serve runs; the inlet's
+├── clock.py     the rules above; the loop prahari serve runs; a watch's
+│                days (it ends, asks, is removed); the inlet's
 │                events; firing: a line that says what it is for, or a
 │                then-turn with what was found marked as outside text
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word

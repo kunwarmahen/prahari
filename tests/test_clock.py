@@ -14,6 +14,8 @@ records the then-turn's prompt, and the time moves by hand.
 
 from __future__ import annotations
 
+import pytest
+
 from helpers import FakeAsker, FakeCaller, FakeNotifier, FakeRunner, Hands, make_clock
 from prahari import watches
 from prahari.looking import Called, TurnResult
@@ -302,3 +304,109 @@ class TestTheClock:
         assert store.interrupt_unfinished() == 1
         assert store.looks(watch.id)[0].outcome == "interrupted"
         clock.close()
+
+
+class TestItsDays:
+    """A watch about a day stops after it; one about a flight stops when it
+    lands; one about nothing in particular asks, once a month. All with no
+    model, and none of it asked first: the end was agreed with the watch."""
+
+    @pytest.fixture(autouse=True)
+    def _one_clock(self, monkeypatch):
+        """Mending (keep) and the clock read the same hands."""
+        from datetime import UTC, datetime
+        self.hands = Hands(datetime.now(UTC))
+        monkeypatch.setattr(watches, "now_utc", self.hands)
+
+    def make(self, tmp_path, answer="Last 61.20", **extra):
+        hands = self.hands
+        notifier = FakeNotifier()
+        store, clock = make_clock(tmp_path, FakeCaller(answer), notifier=notifier,
+                                  now=hands)
+        return store, clock, hands, notifier, price_watch(store, **extra)
+
+    def test_it_ends_when_its_end_comes_and_says_so(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+        until = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+        store, clock, hands, notifier, watch = self.make(
+            tmp_path, ends=until, asked="the fare for Saturday's flight")
+        assert "; until " in watches.sentence(watch)
+        clock.tick()
+        hands.move(hours=3)
+        clock.tick()
+        clock.close()
+        ended = store.get(watch.id)
+        assert ended.state == "ended" and ended.next_at is None
+        said = notifier.sent[-1][1]
+        assert said.startswith("Ended: ALAB under $50\nIts end came (")
+        assert 'You asked: "the fare for Saturday\'s flight"' in said
+        assert f"prahari edit {watch.id} --keep" in said
+        assert store.watches(state="active") == []
+
+    def test_an_ended_watch_is_removed_after_thirty_days(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+        until = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        store, clock, hands, _, watch = self.make(tmp_path, ends=until)
+        hands.move(hours=2)
+        clock.tick()
+        hands.move(days=29)
+        clock.tick()
+        assert store.get(watch.id) is not None
+        hands.move(days=2)
+        clock.tick()
+        clock.close()
+        assert store.get(watch.id) is None and store.looks(watch.id) == []
+
+    def test_it_stops_once_the_thing_is_over(self, tmp_path):
+        store, clock, _, notifier, watch = self.make(
+            tmp_path, answer="Status: Landed 9:28", ends=None)
+        watches.update(store, watch.id, pick={"text": r"Status: (\w+)"},
+                       when={"changed": True}, stop={"contains": "Landed"},
+                       thing="the flight's status")
+        look(clock, store, watch)
+        assert store.get(watch.id).state == "ended"
+        assert ("The flight's status is Landed: what you said would end it "
+                "(says 'Landed').") in notifier.sent[-1][1]
+
+    def test_nothing_is_looked_at_before_it_starts(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+        start = datetime.now(UTC) + timedelta(hours=10)
+        store, clock, hands, _, watch = self.make(tmp_path, starts=start.isoformat())
+        assert watch.next_at == watch.starts and "; from " in watches.sentence(watch)
+        clock.tick()
+        hands.move(hours=9)
+        clock.tick()
+        clock.close()
+        assert store.looks(watch.id) == []
+        _, clock2 = make_clock(tmp_path, FakeCaller("Last 61.20"), now=hands)
+        hands.move(hours=2)
+        clock2.tick()
+        clock2.close()
+        assert outcomes(store, watch) == ["learned"]
+
+    def test_an_open_watch_asks_once_a_month_and_keep_quiets_it(self, tmp_path):
+        store, clock, hands, notifier, watch = self.make(tmp_path)
+        watches.pause(store, watch.id)           # its looks aren't the point here
+        watches.resume(store, watch.id)
+        store.update(watch.id, next_at=None)
+        hands.move(days=31)
+        clock.tick()
+        clock.tick()
+        stills = [t for _, t in notifier.sent if t.startswith("Still want this?")]
+        assert len(stills) == 1 and f"prahari edit {watch.id} --keep" in stills[0]
+        assert store.get(watch.id).state == "active"   # asked, not stopped
+        watches.update(store, watch.id, keep=True)
+        clock.tick()
+        clock.close()
+        assert len([t for _, t in notifier.sent if t.startswith("Still")]) == 1
+
+    def test_keep_brings_an_ended_watch_back(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+        until = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        store, clock, hands, _, watch = self.make(tmp_path, ends=until)
+        hands.move(hours=2)
+        clock.tick()
+        clock.close()
+        assert store.get(watch.id).state == "ended"
+        back = watches.update(store, watch.id, keep=True)
+        assert back.state == "active" and back.ends is None and back.ended_at is None
