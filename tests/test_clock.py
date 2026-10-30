@@ -64,6 +64,10 @@ class TestTheFirstLook:
         watch = price_watch(store)
         assert look(clock, store, watch).outcome == "fired"
         assert "47.1" in notifier.sent[0][1] and "ALAB under $50" in notifier.sent[0][1]
+        # A name alone may not say what is watched: the message says why it came.
+        assert notifier.sent[0][1].endswith(
+            f"(you asked to hear when the number is below 50, looking at "
+            f"{watches.recipe.where_words(watch.check)} · watch {watch.id})")
 
 
 class TestTheEdge:
@@ -226,7 +230,8 @@ class TestTheInlet:
         assert clock.event("whatsapp", {"title": "Ravi", "text": "hi"}) == []
         assert clock.event("sms", {"title": "Mum"}) == []
         assert outcomes(store, watch) == ["fired", "quiet"]
-        assert notifier.sent[0][1] == "Mum on WhatsApp:\n• title: Mum · text: call me"
+        assert notifier.sent[0][1] == ("Mum on WhatsApp:\n• title: Mum · text: call me\n"
+                                       f"(heard at Prahari's inlet as whatsapp · watch {watch.id})")
 
     def test_the_same_event_twice_fires_once(self, tmp_path):
         store, clock, watch, _ = self.make(tmp_path)

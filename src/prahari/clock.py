@@ -516,7 +516,16 @@ def _message(watch: Watch, look: Look) -> str:
     lines += [f"• {line}" for line in shown]
     if len(look.found) > FOUND_SHOWN:
         lines.append(f"(and {len(look.found) - FOUND_SHOWN} more)")
+    lines.append(f"({_about(watch)} · watch {watch.id})")
     return "\n".join(lines)
+
+
+def _about(watch: Watch) -> str:
+    """Why this came, in a line: a name alone may not say what is watched."""
+    if watch.listen:
+        return f"heard at Prahari's inlet as {watch.listen}"
+    return (f"you asked to hear when {recipe.thing_words(watch.pick)} "
+            f"{recipe.when_words(watch.when)}, looking at {recipe.where_words(watch.check)}")
 
 
 def _heard(body: dict) -> str:

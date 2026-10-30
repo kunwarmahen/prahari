@@ -57,6 +57,18 @@ class TestMadeWhole:
         watch = watches.create(store, name="w", listen="whatsapp")
         assert watch.when == {"any": True} and watch.looked and watch.next_at is None
 
+    def test_a_watch_left_unnamed_is_named_by_what_it_watches(self, store):
+        """Not "browser_open watch": the person knows it by the page and the line."""
+        flights = make(store, name="", check={"tool": "browser_open", "args": {
+            "url": "https://www.google.com/travel/flights?tfs=CBwQ"}},
+            pick={"number": r"\$([\d,]+)"}, when={"below": 571})
+        assert flights.name == "google.com/travel/flights: the number is below 571"
+        mail = make(store, name="", check={"tool": "mcp__gmail__search_threads",
+                                            "args": {"query": "from:bank"}},
+                    pick={"items": r"thread (\w+)"}, when={"new": True})
+        assert mail.name == ("mcp__gmail__search_threads 'from:bank': the list has "
+                             "something new")
+
     def test_a_new_watch_looks_soon(self, store):
         watch = make(store)
         assert watch.next_at and not watch.looked and watch.armed

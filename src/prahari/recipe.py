@@ -337,15 +337,9 @@ def holds(when: dict, picked: Picked) -> bool | None:
 
 def sentence(check: dict, listen: str, pick: dict, when: dict, step: str) -> str:
     """The watch in words: what is looked at, how often, and when it fires."""
-    test, want = next(iter(when.items()))
-    what = {"below": f"is below {_num(want)}", "above": f"is above {_num(want)}",
-            "at_most": f"is {_num(want)} or less", "at_least": f"is {_num(want)} or more",
-            "equals": f"is {want!r}", "contains": f"says {want!r}",
-            "lacks": f"stops saying {want!r}", "matches": f"matches {want!r}",
-            "changed": "changes", "new": "has something new",
-            "any": "comes in", "ask": f"makes the answer to {want!r} yes"}[test]
-    thing = {"number": "the number", "text": "the text", "json": "the value",
-             "items": "the list", "items_json": "the list", "": "the result"}[pick_kind(pick)]
+    test = next(iter(when))
+    what = when_words(when)
+    thing = thing_words(pick)
     if listen:
         head = f"when {listen} sends something"
         return f"{head}, if {thing} {what}" if test != "any" else head
@@ -353,6 +347,40 @@ def sentence(check: dict, listen: str, pick: dict, when: dict, step: str) -> str
     look = f"every {duration_words(every(step))}, looks with {tool}"
     edge = (" (once each time it becomes true)" if test in EDGED else "")
     return f"{look}; tells you when {thing} {what}{edge}"
+
+
+def when_words(when: dict) -> str:
+    """The test in words, after the thing: "is below 571", "changes"."""
+    test, want = next(iter(when.items()))
+    return {"below": f"is below {_num(want)}", "above": f"is above {_num(want)}",
+            "at_most": f"is {_num(want)} or less", "at_least": f"is {_num(want)} or more",
+            "equals": f"is {want!r}", "contains": f"says {want!r}",
+            "lacks": f"stops saying {want!r}", "matches": f"matches {want!r}",
+            "changed": "changes", "new": "has something new",
+            "any": "comes in", "ask": f"makes the answer to {want!r} yes"}[test]
+
+
+def thing_words(pick: dict) -> str:
+    """What the pick takes, in words: "the number", "the list"."""
+    return {"number": "the number", "text": "the text", "json": "the value",
+            "items": "the list", "items_json": "the list", "": "the result"}[pick_kind(pick)]
+
+
+def where_words(check: dict) -> str:
+    """What a check looks at, in a few words: a page's site and path
+    ("google.com/travel/flights"), else its first words of argument (a
+    mail search's query), else the tool's name."""
+    args = check.get("args") or {}
+    texts = [v.strip() for v in args.values() if isinstance(v, str) and v.strip()]
+    for text in texts:
+        address = re.match(r"https?://(?:www\.)?([^/?#]+)((?:/[^/?#]+){0,2})", text)
+        if address:
+            return address.group(1) + address.group(2)
+    tool = str(check.get("tool") or "?")
+    if texts:
+        said = " ".join(texts[0].split())
+        return f"{tool} {said if len(said) <= 40 else said[:39] + '…'!r}"
+    return tool
 
 
 # -- the parts ------------------------------------------------------------------

@@ -470,6 +470,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A broken check never fires** | a tool that failed, or a pick that found nothing (the site moved its price), is `failed` or `broken`, never quiet. Three in a row pause the watch, and you're told how to mend it |
 | **A sign-in wall pauses at once** | an expired login doesn't fix itself before the next look |
 | **A limit per day** | at most `max_per_day` fires (10 unless you say) in any 24 hours; past it, kept and not run, and you're told once |
+| **A message says why it came** | a name alone may not say what is watched, so every message ends with what you asked and where it looks — `(you asked to hear when the number is below 571, looking at google.com/travel/flights · watch 9b904bc4)`. A watch made with no name is named the same way, never after the tool it looks with |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
 | **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |

@@ -115,7 +115,11 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
     if len(name) > 80:
         raise WatchError("a watch's name is a few words (80 letters at most)")
     if not name:
-        name = (f"{check['tool']} watch" if check else f"{listen} at the inlet")
+        # The person knows a watch by what it looks at and when it tells
+        # them, not by the tool it looks with.
+        name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick)} "
+                f"{recipe.when_words(when)}" if check else f"{listen} at the inlet")
+        name = name if len(name) <= 80 else name[:79] + "…"
     return {"name": name, "check": check, "listen": listen, "pick": pick, "when": when,
             "every": every.strip() if check else "", "wake": wake, "renew": renew}
 
