@@ -14,21 +14,24 @@ records the then-turn's prompt, and the time moves by hand.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from helpers import FakeAsker, FakeCaller, FakeNotifier, FakeRunner, Hands, make_clock
 from prahari import watches
 from prahari.looking import Called, TurnResult
+from prahari.store import from_iso
 
 MAIL_1 = "thread aaa · from Bank\n  subject: Statement ready"
 MAIL_2 = MAIL_1 + "\nthread bbb · from Bank\n  subject: Card used abroad"
 
 
-def price_watch(store, then="", **extra):
+def price_watch(store, then="", every="1h", **extra):
     return watches.create(store, name="ALAB under $50",
                           check={"tool": "web_fetch", "args": {"url": "https://x.example"}},
                           pick={"number": r"Last ([\d.]+)"}, when={"below": 50},
-                          every="1h", then=then, **extra)
+                          every=every, then=then, **extra)
 
 
 def look(clock, store, watch):
@@ -157,6 +160,31 @@ class TestBrokenIsNeverQuiet:
         assert now.state == "paused" and now.paused_because.startswith("broken 3 times")
         assert "Paused: ALAB under $50" in notifier.sent[-1][1]
         assert f"prahari resume {watch.id}" in notifier.sent[-1][1]
+
+    def test_a_broken_look_shows_what_the_tool_said(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller("Please sign in"))
+        broken = look(clock, store, price_watch(store))
+        assert broken.outcome == "broken" and "It said: Please sign in" in broken.detail
+
+    def test_a_site_that_refused_the_browser_is_a_failure_not_a_broken_pick(
+            self, tmp_path):
+        refused = ("(HTTP 403: https://shop.example/p/1 refused this browser, with a "
+                   "window too.)\n\ntitle: Access Denied\n\nAccess Denied")
+        store, clock = make_clock(tmp_path, FakeCaller(refused))
+        watch = price_watch(store)
+        seen = look(clock, store, watch)
+        assert seen.outcome == "failed"
+        assert "the site refused this look (HTTP 403)" in seen.detail
+        assert "pick" not in seen.detail             # the recipe is not blamed
+        assert store.get(watch.id).trouble == 1      # still counts toward a pause
+
+    def test_a_daily_watch_refused_looks_again_within_the_hour(self, tmp_path):
+        refused = "(HTTP 403: https://shop.example/p/1 refused this browser.)\n\nDenied"
+        store, clock = make_clock(tmp_path, FakeCaller(refused))
+        watch = price_watch(store, every="1d")
+        look(clock, store, watch)
+        gap = from_iso(store.get(watch.id).next_at) - clock.now()
+        assert gap <= timedelta(hours=1)
 
     def test_a_failed_tool_counts_and_a_good_look_resets(self, tmp_path):
         caller = FakeCaller(Called(ok=False, detail="timeout"))

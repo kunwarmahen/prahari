@@ -501,7 +501,8 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A test on a value fires on its edge** | "below 50" tells you once when the price goes under, not every three hours while it stays there |
 | **New is by key** | the same mail is news once, across restarts |
 | **Ask the model last** | `ask` sends only what changed or is new, never the whole answer every look |
-| **A broken check never fires** | a tool that failed, or a pick that found nothing (the site moved its price), is `failed` or `broken`, never quiet. Three in a row pause the watch, and you're told how to mend it |
+| **A broken check never fires** | a tool that failed, or a pick that found nothing (the site moved its price), is `failed` or `broken`, never quiet. Three in a row pause the watch, and you're told how to mend it. A broken look shows the start of what the tool said |
+| **A site that said no isn't a broken recipe** | when a browser look comes back refused (Yantra's `(HTTP 403: … refused this browser` line, a shop's bot shield turning it away now and then), the look is `failed`, says the site refused it, and looks again within the hour instead of a day later (Yantra's notes/151) |
 | **A sign-in wall pauses at once** | an expired login doesn't fix itself before the next look |
 | **A limit per day** | at most `max_per_day` fires (10 unless you say) in any 24 hours; past it, kept and not run, and you're told once |
 | **A watch says what it is for** | every message carries your own words and where it looks — `You asked: "keep an eye on the nonstop to Phoenix"` then `(tells you when the fare is below 571; looks at google.com/travel/flights every 6 hours · watch 9b904bc4)`. A watch made with no name is named by its page and line, never after the tool it looks with ([notes/03](notes/03-a-watch-says-what-it-is-for.md)) |

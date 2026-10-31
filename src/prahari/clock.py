@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -73,6 +74,17 @@ STILL_AFTER = timedelta(days=30)
 
 #: Broken or failed looks in a row before a watch pauses itself.
 MAX_TROUBLE = 3
+#: How a browser look says the site refused it: Yantra's browser_open
+#: answers a 401/403 with this line above the refusal page. That is the
+#: site saying no, not the pick going wrong -- a shop's bot shield does it
+#: now and then -- so the look is "failed", and the recipe is not blamed.
+REFUSED = re.compile(r"\(HTTP (\d{3}): \S+ refused this browser")
+#: How much of a tool's answer a broken look shows, so the person sees
+#: what came back instead of being told only that the pick missed.
+SAID_SHOWN = 200
+#: After a refusal, the next look comes this soon at the latest: a daily
+#: watch that met a bad moment shouldn't wait a day to try again.
+REFUSED_AGAIN = timedelta(hours=1)
 #: The longest the clock sleeps, so a watch added elsewhere is noticed.
 MAX_SLEEP = 30.0
 WORKERS = 4
@@ -294,6 +306,14 @@ class Clock:
         with self._lock:
             return watch_id in self._looking
 
+    def _sooner(self, watch: Watch, within: timedelta) -> None:
+        """Bring the next look forward to ``within`` from now, never later."""
+        current = self.store.get(watch.id)
+        soon = self.now() + within
+        if current is not None and (not current.next_at
+                                    or from_iso(current.next_at) > soon):
+            self.store.update(watch.id, next_at=iso(soon))
+
     def _claim(self, watch: Watch, now: datetime) -> None:
         step = recipe.every(watch.every)
         self.store.update(watch.id, next_at=iso(now + step))
@@ -380,10 +400,19 @@ class Clock:
         ``heard``: an inlet event in a line, which is what is told."""
         picked = recipe.apply(watch.pick, text)
         if not picked.found:
-            look.outcome = "broken"
-            look.detail = ("the check answered, but its pick found nothing in it "
-                           f"(pick {json.dumps(watch.pick) or 'all'}); the page or the "
-                           "tool's answer may have changed")
+            refused = REFUSED.match(text.lstrip())
+            if refused:
+                look.outcome = "failed"
+                look.detail = (f"the site refused this look (HTTP {refused.group(1)}); "
+                               "some sites turn a browser away now and then, so it "
+                               "looks again within the hour")
+                self._sooner(watch, REFUSED_AGAIN)
+            else:
+                look.outcome = "broken"
+                look.detail = ("the check answered, but its pick found nothing in it "
+                               f"(pick {json.dumps(watch.pick) or 'all'}); the page or "
+                               "the tool's answer may have changed. It said: "
+                               + " ".join(text.split())[:SAID_SHOWN])
             if not inlet:
                 self._trouble(watch, look)
             self._done(watch, look)
