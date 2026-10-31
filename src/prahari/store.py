@@ -138,6 +138,9 @@ class Watch:
     #: it was made), and when it last asked them whether to.
     kept_at: str | None = None
     still_asked_at: str | None = None
+    #: The person's own time zone ("Europe/London"), its days and times
+    #: said on their clock; "" for this computer's.
+    zone: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -208,7 +211,8 @@ CREATE TABLE IF NOT EXISTS watch (
     stop TEXT NOT NULL DEFAULT '{}',
     ended_at TEXT,
     kept_at TEXT,
-    still_asked_at TEXT
+    still_asked_at TEXT,
+    zone TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
@@ -265,7 +269,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("thing", "TEXT NOT NULL DEFAULT ''"),
                     ("starts", "TEXT"), ("ends", "TEXT"),
                     ("stop", "TEXT NOT NULL DEFAULT '{}'"), ("ended_at", "TEXT"),
-                    ("kept_at", "TEXT"), ("still_asked_at", "TEXT")),
+                    ("kept_at", "TEXT"), ("still_asked_at", "TEXT"),
+                    ("zone", "TEXT NOT NULL DEFAULT ''")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
 
 

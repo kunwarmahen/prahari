@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from prahari import recipe
 from prahari.store import RUNNERS, Store, Watch, from_iso, iso, now_utc
@@ -50,10 +51,23 @@ class WatchError(ValueError):
     """A watch that cannot be made or changed, said in words."""
 
 
-def moment(raw, what: str) -> str | None:
+def place(zone: str = ""):
+    """``zone`` ("Europe/London") as a tzinfo; None for this computer's
+    clock. A name nobody knows is a WatchError, never a silent UTC."""
+    zone = (zone or "").strip()
+    if not zone:
+        return None
+    try:
+        return ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise WatchError(f"zone is a time zone like Europe/London, not {zone!r}") from None
+
+
+def moment(raw, what: str, zone: str = "") -> str | None:
     """A start or an end, as ISO in UTC; None for none. ISO 8601 with the
-    person's offset ("2026-10-31T23:59-04:00"); without one, it is this
-    computer's own clock (the house's, for a time typed here)."""
+    person's offset ("2026-10-31T23:59-04:00"); without one, it is on the
+    person's clock (``zone``), or with none this computer's own (the
+    house's, for a time typed here)."""
     text = str(raw or "").strip()
     if not text:
         return None
@@ -62,13 +76,23 @@ def moment(raw, what: str) -> str | None:
     except ValueError:
         raise WatchError(f"{what} is a date and time like 2026-10-31T23:59-04:00 "
                          f"(with the person's offset), not {text!r}") from None
-    return iso(when if when.tzinfo else when.astimezone())
+    if when.tzinfo is None:
+        tz = place(zone)
+        when = when.replace(tzinfo=tz) if tz is not None else when.astimezone()
+    return iso(when)
 
 
-def shown_at(stamp: str | None) -> str:
-    """A start or end the way a person reads it, on this computer's clock."""
+def shown_at(stamp: str | None, zone: str = "") -> str:
+    """A start or end the way a person reads it: on their clock (``zone``),
+    or with none on this computer's."""
     when = from_iso(stamp)
-    return "" if when is None else f"{when.astimezone():%a %-d %b %H:%M}"
+    if when is None:
+        return ""
+    try:
+        tz = place(zone)
+    except WatchError:
+        tz = None
+    return f"{when.astimezone(tz):%a %-d %b %H:%M}"
 
 
 def max_watches() -> int:
@@ -98,7 +122,7 @@ def _call(raw, what: str) -> dict:
 
 def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=None,
             every: str = "", wake: str = "", renew=None, asked: str = "",
-            thing: str = "", starts=None, ends=None, stop=None) -> dict:
+            thing: str = "", starts=None, ends=None, stop=None, zone: str = "") -> dict:
     """The recipe's parts, checked together; WatchError in words."""
     try:
         check = recipe._form(check, "check")
@@ -154,11 +178,12 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
         name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick, thing)} "
                 f"{recipe.when_words(when)}" if check else f"{listen} at the inlet")
         name = name if len(name) <= 80 else name[:79] + "…"
-    starts, ends = moment(starts, "starts"), moment(ends, "ends")
+    place(zone)
+    starts, ends = moment(starts, "starts", zone), moment(ends, "ends", zone)
     if starts and ends and from_iso(ends) <= from_iso(starts):
         raise WatchError("ends comes after starts")
     return {"name": name, "asked": asked, "thing": thing, "starts": starts, "ends": ends,
-            "stop": stop,
+            "stop": stop, "zone": (zone or "").strip(),
             "check": check, "listen": listen, "pick": pick, "when": when,
             "every": every.strip() if check else "", "wake": wake, "renew": renew}
 
@@ -166,16 +191,16 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
 def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=None,
            when=None, every: str = "", wake: str = "", renew=None, then: str = "",
            asked: str = "", thing: str = "", starts=None, ends=None, stop=None,
-           owner: str = LOCAL_OWNER,
+           zone: str = "", owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None) -> Watch:
     parts = checked(name=name, check=check, listen=listen, pick=pick, when=when,
                     every=every, wake=wake, renew=renew, asked=asked, thing=thing,
-                    starts=starts, ends=ends, stop=stop)
+                    starts=starts, ends=ends, stop=stop, zone=zone)
     if parts["ends"] and from_iso(parts["ends"]) <= now_utc():
-        raise WatchError(f"ends ({shown_at(parts['ends'])}) has already passed")
+        raise WatchError(f"ends ({shown_at(parts['ends'], zone)}) has already passed")
     twin = same_as(store, owner, parts)
     if twin is not None:
         raise WatchError(
@@ -230,14 +255,14 @@ def span_words(watch: Watch) -> str:
     said = ""
     start = from_iso(watch.starts)
     if start is not None and start > now_utc():
-        said += f"; from {shown_at(watch.starts)}"
+        said += f"; from {shown_at(watch.starts, watch.zone)}"
     if watch.ends:
-        said += f"; until {shown_at(watch.ends)}"
+        said += f"; until {shown_at(watch.ends, watch.zone)}"
     if watch.stop:
         said += (f"; stops once {recipe.thing_words(watch.pick, watch.thing)} "
                  f"{recipe.when_words(watch.stop)}")
     if watch.state == "ended":
-        said += f"; ended {shown_at(watch.ended_at)}"
+        said += f"; ended {shown_at(watch.ended_at, watch.zone)}"
     return said
 
 
@@ -294,9 +319,9 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         starts=given.get("starts", watch.starts),
         ends=given.get("ends", watch.ends) if not (given.get("keep") and "ends" not in given
                                                    and _passed(watch.ends)) else None,
-        stop=given.get("stop", watch.stop))
+        stop=given.get("stop", watch.stop), zone=watch.zone)
     if "ends" in given and _passed(parts["ends"]):
-        raise WatchError(f"ends ({shown_at(parts['ends'])}) has already passed")
+        raise WatchError(f"ends ({shown_at(parts['ends'], watch.zone)}) has already passed")
     fields: dict = {"name": parts["name"], "asked": parts["asked"], "thing": parts["thing"],
                     "wake": parts["wake"], "renew": parts["renew"], "starts": parts["starts"],
                     "ends": parts["ends"], "stop": parts["stop"]}
@@ -428,7 +453,8 @@ RESULT_SHOWN = 1500
 def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
             every: str = "", sample=None, agent: str = "", runner: str = "direct",
             owner: str = LOCAL_OWNER, wake: str = "", renew=None, thing: str = "",
-            starts=None, ends=None, stop=None, store: Store | None = None) -> dict:
+            starts=None, ends=None, stop=None, store: Store | None = None,
+            zone: str = "") -> dict:
     """Try a recipe ONCE, before anybody said yes: look (only with a tool
     that reads -- nothing is granted yet), pick, and say what it saw.
 
@@ -440,9 +466,11 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
     import json as _json
 
     parts = checked(check=check, listen=listen, pick=pick, when=when, every=every,
-                    wake=wake, renew=renew, thing=thing, starts=starts, ends=ends, stop=stop)
+                    wake=wake, renew=renew, thing=thing, starts=starts, ends=ends, stop=stop,
+                    zone=zone)
     span = Watch(id="", owner=owner, name="", pick=parts["pick"], thing=parts["thing"],
-                 starts=parts["starts"], ends=parts["ends"], stop=parts["stop"])
+                 starts=parts["starts"], ends=parts["ends"], stop=parts["stop"],
+                 zone=parts["zone"])
     out: dict = {"sentence": recipe.sentence(parts["check"], parts["listen"],
                                              parts["pick"], parts["when"], parts["every"],
                                              parts["thing"])

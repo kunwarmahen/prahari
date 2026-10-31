@@ -21,8 +21,12 @@ contains, equals …): "changed" can't say the thing is over. What it saw
 on that look is told first, then that it ended.
 
 Times are ISO 8601 with the person's offset (`2026-10-31T23:59-04:00`),
-kept in UTC and said back on this computer's clock (`until Sat 31 Oct
-23:59`). An agent works them out from what was said — "this Saturday",
+kept in UTC and said back on the person's own clock (`until Sat 31 Oct
+23:59`). Whose clock is the harness's to say: `prahari mcp --zone
+Europe/London` (Dvara passes each person's `zone`), kept on the watch,
+so a time with no offset is theirs and every day the watch says, at the
+card and in the messages it sends weeks later, is said on it. With no
+zone it is this computer's: one house, one clock. An agent works them out from what was said — "this Saturday",
 "tomorrow morning" — and the card, the puck's sentence and the list all
 say them, so the person hears the days before saying yes.
 

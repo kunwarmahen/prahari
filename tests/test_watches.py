@@ -114,6 +114,39 @@ class TestMadeWhole:
         assert mended.asked == "tell me when it's under 50" and mended.last_value == ""
 
 
+class TestThePersonsClock:
+    """Someone in another zone is told their own times, not the house's."""
+
+    def test_a_time_with_no_offset_is_on_the_persons_clock(self, store):
+        watch = make(store, ends="2099-07-01T18:00", zone="Europe/London")
+        assert watch.ends == "2099-07-01T17:00:00+00:00"        # BST is UTC+1
+        assert watch.zone == "Europe/London"
+
+    def test_its_days_are_said_on_the_persons_clock(self, store):
+        watch = make(store, ends="2099-07-01T17:00+00:00", zone="Europe/London")
+        assert "until Wed 1 Jul 18:00" in watches.sentence(watch)
+        tokyo = watches.shown_at(watch.ends, "Asia/Tokyo")
+        assert tokyo == "Thu 2 Jul 02:00"
+
+    def test_a_zone_nobody_knows_is_refused_not_taken_for_utc(self, store):
+        with pytest.raises(WatchError, match="time zone like Europe/London"):
+            make(store, ends="2099-07-01T18:00", zone="Mars/Olympus")
+
+    def test_the_agents_tools_carry_the_zone_into_the_watch(self, store, tmp_path):
+        from prahari import mcp
+        t = mcp.Tools(store, tmp_path, FakeCaller("Last 47"), person="asha",
+                      zone="Europe/London")
+        said = t.call("preview_watch", {"check": CHECK, "pick": {"number": ""},
+                                        "when": {"below": 50}, "every": "1h",
+                                        "ends": "2099-07-01T18:00"})
+        assert "until Wed 1 Jul 18:00" in said
+        t.call("create_watch", {"name": "x", "asked": "tell me", "check": CHECK,
+                                "pick": {"number": ""}, "when": {"below": 50},
+                                "every": "1h", "ends": "2099-07-01T18:00"})
+        (watch,) = store.watches()
+        assert watch.zone == "Europe/London" and watch.ends.startswith("2099-07-01T17:00")
+
+
 class TestOnePersonsWatches:
     def test_another_persons_watch_is_no_watch(self, store):
         theirs = make(store, owner="asha")

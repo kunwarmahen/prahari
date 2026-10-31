@@ -225,6 +225,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--for", dest="person", required=True, metavar="WHO")
     p.add_argument("--agent", default="", metavar="DIR|NAME")
     p.add_argument("--runner", choices=("direct", "dvara"), default=None)
+    p.add_argument("--zone", default="", metavar="ZONE",
+                   help="the person's own time zone (Europe/London): days and times "
+                        "on their clock")
 
     p = sub.add_parser("unit", help="a systemd user unit that keeps prahari serve "
                                     "running; prints it, or --install")
@@ -409,7 +412,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
     if cmd == "mcp":
         tools = mcp.Tools(store, state, _caller(state), person=args.person,
                           agent=args.agent, runner=args.runner, dvara=_dvara(),
-                          home=_home())
+                          home=_home(), zone=args.zone)
         mcp.serve(tools)
         return 0
     if cmd == "unit":
@@ -725,7 +728,8 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
     print(f"{watch.id}  {watch.state:<7} {watch.name}")
     if watch.asked:
         print(f"          asked: \"{watch.asked}\"")
-    print(f"          {watches.sentence(watch)}")
+    print(f"          {watches.sentence(watch)}"
+          + (f"  (times on {watch.zone})" if watch.zone else ""))
     print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
           if full or watch.then else "          then: tells you what it saw")
     if watch.paused_because:

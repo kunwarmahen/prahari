@@ -470,7 +470,11 @@ with the tools an agent uses:
 
 ```bash
 prahari mcp --for local --agent ~/agents/reader     # what a harness starts
+prahari mcp --for asha --zone Europe/London        # someone not on this computer's clock
 ```
+
+`--zone` is the person's own clock: a start or end given with no offset
+is on it, and every day and time their watches say is said on it.
 
 | Tool | |
 |---|---|

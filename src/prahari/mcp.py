@@ -35,7 +35,9 @@ ONE PERSON PER SERVER. ``--for`` is the harness's; every tool sees and
 changes only that person's watches, and the model has no argument with
 which to name anyone else. ``--agent`` and ``--runner`` are the
 harness's too: a watch made while talking to your mail agent looks with,
-and wakes, your mail agent.
+and wakes, your mail agent. So is ``--zone``, the person's own clock: a
+start or end given with no offset is on it, and every day and time the
+watch says, now and in the messages it sends later, is said on it.
 """
 
 from __future__ import annotations
@@ -223,8 +225,10 @@ class ToolFailed(Exception):
 class Tools:
     def __init__(self, store: Store, state: Path, caller, *, person: str,
                  agent: str = "", runner: str | None = None, dvara=None,
-                 home: set[str] | None = None) -> None:
+                 home: set[str] | None = None, zone: str = "") -> None:
         self.store = store
+        #: The person's own time zone; "" for this computer's.
+        self.zone = zone
         #: The names this computer's own person goes by (their key is the
         #: one kept in the state folder).
         self.home = set(home or {watches.LOCAL_OWNER})
@@ -257,7 +261,7 @@ class Tools:
                                wake=str(args.get("wake") or ""), renew=args.get("renew"),
                                thing=str(args.get("thing") or ""),
                                starts=args.get("starts"), ends=args.get("ends"),
-                               stop=args.get("stop"), store=self.store)
+                               stop=args.get("stop"), store=self.store, zone=self.zone)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         asked = str(args.get("asked") or "").strip()
         if asked:
@@ -339,7 +343,7 @@ class Tools:
             self.store, name=str(args.get("name") or ""), check=args.get("check"),
             asked=str(args.get("asked") or ""), thing=str(args.get("thing") or ""),
             starts=args.get("starts"), ends=args.get("ends"), stop=args.get("stop"),
-            listen=str(args.get("listen") or ""), pick=args.get("pick"),
+            zone=self.zone, listen=str(args.get("listen") or ""), pick=args.get("pick"),
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
             then=str(args.get("then") or ""), owner=self.person, runner=self.runner,

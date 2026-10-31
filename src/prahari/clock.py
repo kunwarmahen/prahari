@@ -180,7 +180,7 @@ class Clock:
         for watch in self.store.watches(state="active"):
             ends = from_iso(watch.ends)
             if ends is not None and ends <= now:
-                self._end(watch, f"Its end came ({_at(watch.ends)}), as was set.")
+                self._end(watch, f"Its end came ({_at(watch.ends, watch.zone)}), as was set.")
             elif ends is None and not watch.stop:
                 self._still(watch, now)
         for watch in self.store.watches(state="ended"):
@@ -208,8 +208,8 @@ class Clock:
         self._send(watch, "\n".join([
             f"Still want this? {watch.name}",
             *([f'You asked: "{watch.asked}"'] if watch.asked else []),
-            f"It has been watching since {_at(iso(since))}, with no end set. It goes on "
-            "looking; ask me to remove it, or to keep it, and I won't ask again for "
+            f"It has been watching since {_at(iso(since), watch.zone)}, with no end set. "
+            "It goes on looking; ask me to remove it, or to keep it, and I won't ask again for "
             f"{STILL_AFTER.days} days (prahari edit {watch.id} --keep)."]))
 
     def look_now(self, watch_id: str) -> Look:
@@ -647,9 +647,10 @@ def _started(watch: Watch, now: datetime) -> bool:
     return start is None or start <= now
 
 
-def _at(stamp: str | None) -> str:
-    when = from_iso(stamp)
-    return "" if when is None else f"{when.astimezone():%a %-d %b %H:%M}"
+def _at(stamp: str | None, zone: str = "") -> str:
+    from prahari.watches import shown_at
+
+    return shown_at(stamp, zone)
 
 
 def _thing(watch: Watch) -> str:
