@@ -103,6 +103,40 @@ You asked: "tell me if bitcoin is under 200 thousand dollars"
 (tells you when BTC's price is below 200,000; looks at api.coinbase.com/v2/prices every hour · watch d14a1709)
 ```
 
+## Their words, not the model's
+
+Made through an agent on `qwen3.8`, the same watch's `asked` came back
+as *"notify me when Bitcoin falls below $200,000"* for *"tell me if it
+goes under 200 thousand dollars"*. The sense was right and the words
+were not theirs, and every message prints them after *You asked:*. Two
+changes. `asked` now tells the model to copy the message word for word,
+the one where they asked rather than their yes, with that very
+rewording as the example of what not to write. And `preview_watch`
+takes `asked` and reads it back as the messages will begin, so the
+person hears their own words, or someone else's, before they agree.
+
+The same request again on `qwen3.8-64k:latest`, through Yantra with a
+scratch Prahari, after the change:
+
+```
+→ mcp__prahari__preview_watch()
+The trial look works. Here's the watch, in words:
+
+> **Every 30 minutes, it opens Bitcoin's price page (TradingView) and tells
+> you when the spot price falls below $70,000** — once each time it drops
+> under the line.
+
+It sees **$77,424** right now, so no match yet. Its messages will begin:
+*"You asked: 'tell me if bitcoin goes under 70 thousand dollars'"*
+```
+
+Word for word, and said to the person before the yes.
+
+Prahari can't check the words itself: the conversation never reaches
+it, and the message that asked is not the last one (the last is the
+yes). Having Yantra fill `asked` from the conversation would have to
+guess which message that was, which is the model's job done worse.
+
 When a watch begins and when it is over — a fare after Saturday, a
 flight once it lands — is [note 04](04-a-watch-has-its-days.md).
 

@@ -97,9 +97,12 @@ _STOP = {"type": "object", "description": (
     "Ends it once what it sees passes this test, same form as when: "
     "{\"contains\": \"Landed\"} for a flight's status. Leave out otherwise.")}
 _ASKED = {"type": "string", "description": (
-    "What the person asked for, in their own words, as they said it (\"keep an eye "
-    "on the nonstop to Phoenix and tell me if it gets cheaper\"). Shown first "
-    "wherever the watch is, and in every message it sends.")}
+    "The person's own message that asked for this watch, COPIED WORD FOR WORD, "
+    "never reworded or tidied (\"tell me if it goes under 200 thousand dollars\" "
+    "stays exactly that -- not \"notify me when Bitcoin falls below $200,000\"). "
+    "The message where they asked, not their yes. Shown first wherever the watch "
+    "is, and in every message it sends, as \"You asked: ...\" -- so words they "
+    "never said read as a lie.")}
 _THING = {"type": "string", "description": (
     "What the pick takes, in a few words: \"the fare\", \"the temperature\", "
     "\"BTC's price\". Messages say \"the fare is now 58\" instead of \"the "
@@ -116,7 +119,7 @@ TOOLS: list[dict] = [
          "inlet, give a sample event instead of a check."),
      "inputSchema": {"type": "object", "properties": {
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY, "thing": _THING,
-         "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
+         "asked": _ASKED, "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "listen": {"type": "string", "description": "for an inlet watch instead "
                     "of a check: the one word a sender posts to (whatsapp)"},
          "wake": _WAKE,
@@ -256,6 +259,12 @@ class Tools:
                                starts=args.get("starts"), ends=args.get("ends"),
                                stop=args.get("stop"), store=self.store)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
+        asked = str(args.get("asked") or "").strip()
+        if asked:
+            # read back to the person before their yes: a reworded one is
+            # caught here, not in the first message the watch sends
+            lines.append(f'Its messages will begin: You asked: "{asked}" -- tell the '
+                         "person that too; those must be their own words.")
         if said.get("items"):
             lines += ["Items it sees now (first few):", *[f"  {i}" for i in said["items"]]]
         if said.get("result") and not said.get("found", True):

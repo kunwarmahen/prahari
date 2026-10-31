@@ -235,8 +235,11 @@ takes, so you can tell later what it watches. `--asked` is what you asked
 for, in your own words: it is shown first wherever the watch is, and
 ends every message it sends. `--thing` names the number ("the fare",
 "the temperature"), so a message says *the fare is now 58* instead of
-*the number is now 58*. An agent must give a name and `asked`; by hand
-both are yours to leave out.
+*the number is now 58*. An agent must give a name and `asked`, copied
+from your message word for word; it gives `asked` to `preview_watch`
+too, which reads it back (*Its messages will begin: You asked: "…"*) so
+words you never said are caught before your yes. By hand both are yours
+to leave out.
 
 **from**, **until** and **stop** — a watch's days. `--from` is when it
 starts looking (before then it makes no look); `--until` is when it ends
@@ -471,7 +474,7 @@ prahari mcp --for local --agent ~/agents/reader     # what a harness starts
 
 | Tool | |
 |---|---|
-| `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer |
+| `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer, and reads back `asked` as the watch's messages will say it |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
 | `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first |

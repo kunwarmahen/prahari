@@ -55,6 +55,20 @@ class TestTheTools:
         assert watch.owner == "asha" and watch.agent == "/agents/a"
         assert watch.created_via == "agent"
 
+    def test_a_preview_reads_back_what_the_person_asked_before_their_yes(self, store,
+                                                                         tmp_path):
+        said = tools(store, tmp_path).call(
+            "preview_watch", {"check": CHECK, "pick": {"number": ""}, "when": {"below": 50},
+                              "every": "3h", "asked": "tell me if it goes under 50"})
+        assert 'You asked: "tell me if it goes under 50"' in said
+        quiet = tools(store, tmp_path).call(
+            "preview_watch", {"check": CHECK, "pick": {"number": ""}, "when": {"below": 50},
+                              "every": "3h"})
+        assert "You asked" not in quiet
+
+    def test_asked_tells_the_model_to_copy_the_words_not_reword_them(self):
+        assert "WORD FOR WORD" in mcp._ASKED["description"]
+
     def test_a_preview_that_found_nothing_shows_the_answer(self, store, tmp_path):
         said = tools(store, tmp_path, answer="<b>Price</b> forty seven").call(
             "preview_watch", {"check": CHECK, "pick": {"number": ""},
