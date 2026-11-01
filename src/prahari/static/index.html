@@ -52,6 +52,7 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 
 header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 26px; }
 .mark { font-family: var(--deva); font-size: 52px; line-height: .9; font-weight: 600; }
+.mark .logo { width: .9em; height: .9em; border-radius: 22%; vertical-align: -.06em; margin-right: .22em; }
 .mark small { display: block; font: 14px/1.4 var(--sans); color: var(--ink-3); margin-top: 10px; }
 .state-line { margin-left: auto; text-align: right; color: var(--ink-2); font-size: 14px;
               max-width: 56ch; }
@@ -136,7 +137,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
 <body>
 <div class="wrap">
   <header>
-    <div class="mark">प्रहरी<small>Prahari — watches for what you're waiting for</small></div>
+    <div class="mark"><img class="logo" src="favicon.svg" alt="">प्रहरी<small>Prahari — watches for what you're waiting for</small></div>
     <div class="state-line" id="state-line">…</div>
   </header>
 
