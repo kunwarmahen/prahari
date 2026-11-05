@@ -74,11 +74,27 @@ STILL_AFTER = timedelta(days=30)
 
 #: Broken or failed looks in a row before a watch pauses itself.
 MAX_TROUBLE = 3
+#: Looks in a row a site turned away before the watch pauses: the site,
+#: not the recipe, said no, so it gets a few more days than a broken pick.
+MAX_TURNED_AWAY = 5
 #: How a browser look says the site refused it: Yantra's browser_open
 #: answers a 401/403 with this line above the refusal page. That is the
 #: site saying no, not the pick going wrong -- a shop's bot shield does it
 #: now and then -- so the look is "failed", and the recipe is not blamed.
 REFUSED = re.compile(r"\(HTTP (\d{3}): \S+ refused this browser")
+#: A bot shield's own page, answered with a 200: "Verifying the device...",
+#: "Just a moment...". The page the watch wanted never came, so nothing
+#: in it can be judged -- a pick of all of it would call it quiet.
+WALL = re.compile(r"verifying the device|verify(?:ing)? (?:that )?you are (?:a )?human"
+                  r"|checking your browser|checking if the site connection is secure"
+                  r"|press (?:&|and) hold|are you a robot|just a moment\.\.\."
+                  r"|pardon our interruption|unusual traffic from your"
+                  r"|\baccess denied\b", re.I)
+#: A wall is said near the top of what came back; a real page that
+#: happens to say these words further down is left alone.
+WALL_SEEN = 800
+#: Where a look that browser_open keeps being turned away can go instead.
+PHONE_TOOL = "mcp__sparsh__open_url"
 #: How much of a tool's answer a broken look shows, so the person sees
 #: what came back instead of being told only that the pick missed.
 SAID_SHOWN = 200
@@ -398,21 +414,29 @@ class Clock:
                heard: str = "") -> bool:
         """What the check (or the event) said, decided. True if it fired.
         ``heard``: an inlet event in a line, which is what is told."""
+        turned = _turned_away(text) if not inlet else ""
+        if turned:
+            look.outcome = "failed"
+            look.detail = turned
+            current = self.store.get(watch.id)
+            if current is not None and current.trouble == 0:
+                # One quick try again; after that the watch keeps its own
+                # pace, so a bad afternoon doesn't use up its tries.
+                look.detail += ", so it looks again within the hour"
+                self._sooner(watch, REFUSED_AGAIN)
+            if watch.check.get("tool") != PHONE_TOOL:
+                look.detail += (f"; if it keeps happening, a spare phone's browser "
+                                f"({PHONE_TOOL}) usually gets through")
+            self._trouble(watch, look, most=MAX_TURNED_AWAY)
+            self._done(watch, look)
+            return False
         picked = recipe.apply(watch.pick, text)
         if not picked.found:
-            refused = REFUSED.match(text.lstrip())
-            if refused:
-                look.outcome = "failed"
-                look.detail = (f"the site refused this look (HTTP {refused.group(1)}); "
-                               "some sites turn a browser away now and then, so it "
-                               "looks again within the hour")
-                self._sooner(watch, REFUSED_AGAIN)
-            else:
-                look.outcome = "broken"
-                look.detail = ("the check answered, but its pick found nothing in it "
-                               f"(pick {json.dumps(watch.pick) or 'all'}); the page or "
-                               "the tool's answer may have changed. It said: "
-                               + " ".join(text.split())[:SAID_SHOWN])
+            look.outcome = "broken"
+            look.detail = ("the check answered, but its pick found nothing in it "
+                           f"(pick {json.dumps(watch.pick) or 'all'}); the page or "
+                           "the tool's answer may have changed. It said: "
+                           + " ".join(text.split())[:SAID_SHOWN])
             if not inlet:
                 self._trouble(watch, look)
             self._done(watch, look)
@@ -551,13 +575,13 @@ class Clock:
 
     # -- bookkeeping -------------------------------------------------------
 
-    def _trouble(self, watch: Watch, look: Look) -> None:
+    def _trouble(self, watch: Watch, look: Look, most: int = MAX_TROUBLE) -> None:
         current = self.store.get(watch.id)
         if current is None:
             return
         count = current.trouble + 1
         self.store.update(watch.id, trouble=count)
-        if count >= MAX_TROUBLE and current.state == "active":
+        if count >= most and current.state == "active":
             self._pause(current, look, f"{look.outcome} {count} times in a row; last: "
                                        f"{look.detail}")
 
@@ -666,3 +690,15 @@ def _was(stored: str) -> str:
     picked = recipe.Picked(found=True, value=value)
     return picked.shown() or "(empty)"
 
+
+def _turned_away(text: str) -> str:
+    """Why the page the watch wanted never came, or "" if it did."""
+    refused = REFUSED.match(text.lstrip())
+    if refused:
+        return (f"the site refused this look (HTTP {refused.group(1)}); "
+                "some sites turn a browser away now and then")
+    wall = WALL.search(text[:WALL_SEEN])
+    if wall:
+        return (f"the site showed its bot check (\"{wall.group(0)}\") instead of "
+                "the page, so nothing could be judged")
+    return ""

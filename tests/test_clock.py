@@ -186,6 +186,55 @@ class TestBrokenIsNeverQuiet:
         gap = from_iso(store.get(watch.id).next_at) - clock.now()
         assert gap <= timedelta(hours=1)
 
+    def test_only_the_first_refusal_brings_the_next_look_forward(self, tmp_path):
+        refused = "(HTTP 403: https://shop.example/p/1 refused this browser.)\n\nDenied"
+        store, clock = make_clock(tmp_path, FakeCaller(refused))
+        watch = price_watch(store, every="1d")
+        clock.look_now(watch.id)
+        clock.look_now(watch.id)
+        clock.close()
+        second = store.looks(watch.id, limit=1)[0]
+        assert "within the hour" not in second.detail
+        gap = from_iso(store.get(watch.id).next_at) - clock.now()
+        assert gap > timedelta(hours=1)          # back to its own pace
+
+    def test_a_site_turning_it_away_pauses_after_five_not_three(self, tmp_path):
+        refused = "(HTTP 403: https://shop.example/p/1 refused this browser.)\n\nDenied"
+        store, clock = make_clock(tmp_path, FakeCaller(refused))
+        watch = price_watch(store)
+        for _ in range(4):
+            clock.look_now(watch.id)
+        assert store.get(watch.id).state == "active"
+        clock.look_now(watch.id)
+        clock.close()
+        assert store.get(watch.id).state == "paused"
+
+    def test_a_bot_check_page_is_a_failure_not_a_quiet_look(self, tmp_path):
+        wall = ("App: com.android.chrome (Opened in the phone's own browser.) "
+                '1 list [scroll] 2 list [scroll] 3 text "logo" '
+                '4 text "Verifying the device..."')
+        store, clock = make_clock(tmp_path, FakeCaller(wall))
+        watch = watches.create(store, name="multi-buy deal",
+                               check={"tool": "mcp__sparsh__open_url",
+                                      "args": {"url": "https://shop.example/p/1"}},
+                               pick={}, when={"matches": r"(?i)buy\s*\d"}, every="1d")
+        seen = look(clock, store, watch)
+        assert seen.outcome == "failed"
+        assert "bot check" in seen.detail and "Verifying the device" in seen.detail
+        assert "spare phone" not in seen.detail  # it is the phone already
+        assert not store.get(watch.id).looked     # nothing was learned from it
+
+    def test_a_browser_turned_away_is_pointed_at_the_phone(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller("Just a moment...\nChecking"))
+        seen = look(clock, store, price_watch(store))
+        assert seen.outcome == "failed" and "mcp__sparsh__open_url" in seen.detail
+
+    def test_the_words_far_down_a_real_page_are_left_alone(self, tmp_path):
+        page = "Last 42 " + "x " * 600 + "Access denied to the staff room"
+        store, clock = make_clock(tmp_path, FakeCaller(page))
+        seen = look(clock, store, price_watch(store))
+        assert seen.outcome != "failed" and seen.value == "42"
+
     def test_a_failed_tool_counts_and_a_good_look_resets(self, tmp_path):
         caller = FakeCaller(Called(ok=False, detail="timeout"))
         store, clock = make_clock(tmp_path, caller)

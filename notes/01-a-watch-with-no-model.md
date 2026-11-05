@@ -106,6 +106,28 @@ it breaks:
   due and now plus the new step (the page's **every** box, or
   `prahari edit ID --every 30m`).
 
+* **A page that never came is not judged.** A shop's bot shield answers
+  with a page of its own — a 403, or a 200 that says "Verifying the
+  device..." — and a watch whose pick takes all of it (a `matches` test
+  for a multi-buy deal) would read that as "no deal today" and stay
+  quiet. So before the pick, a look checks the top of what came back
+  for a refusal or a bot check; either one is `failed`, "the site showed
+  its bot check ("Verifying the device") instead of the page". The site
+  said no, not the recipe, so the first one looks again within the hour,
+  later ones keep the watch's own pace (an hourly retry all afternoon
+  used up a daily watch's three tries in one bad day), and five in a row
+  pause it, not three. A browser look turned away says a spare phone's
+  browser usually gets through.
+
+  The look that showed this, on a Food Lion watch read through the
+  phone, came back `quiet` before:
+
+  ```
+  Sun 1 Nov 15:51  quiet      App: com.android.chrome (Opened in the phone's own
+      browser. Its list is the top of the page; scroll down for more.) 1 list
+      [scroll] 2 list [scroll] 3 text "logo" 4 text "Verifying the device..."
+  ```
+
 ## Asking the model last
 
 Some tests can't be written as a pattern: "tell me when a mail looks
