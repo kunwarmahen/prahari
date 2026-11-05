@@ -140,6 +140,13 @@ def grant_for(tool: str, args: dict) -> str | None:
     return f"{tool}(" + ", ".join(parts) + ")"
 
 
+def asked_by(watch: Watch) -> str:
+    """How a phone's log names this watch's steps ("Prahari: Mayfield ice
+    cream"): Sparsh's page says who asked for each step. A label for the
+    person, never a key."""
+    return f"Prahari: {watch.name or watch.id or 'a watch'}"
+
+
 class Caller:
     """One look: ``yantra --call`` with the watch's check."""
 
@@ -173,7 +180,9 @@ class Caller:
             return Called(ok=False, detail=str(exc))
         where.mkdir(parents=True, exist_ok=True)
         out, err, timed_out = _run(argv, cwd=self.home if self.home and self.home.is_dir()
-                                   else where, limit=self.limit)
+                                   else where, limit=self.limit,
+                                   # who asked, for a phone's log (Sparsh's page)
+                                   env={**os.environ, "YANTRA_ASKED_BY": asked_by(watch)})
         if timed_out:
             return Called(ok=False, detail=f"the look took longer than {self.limit}s")
         data = _json_line(out, CALL_FORMAT)
@@ -283,7 +292,7 @@ class DirectRunner:
         return [*argv, "--prompt", prompt]
 
     def env(self, watch: Watch) -> dict[str, str]:
-        env = {**os.environ, "YANTRA_UNATTENDED": "1"}
+        env = {**os.environ, "YANTRA_UNATTENDED": "1", "YANTRA_ASKED_BY": asked_by(watch)}
         whom = self.asks_whom(watch)
         if whom:
             env.update(YANTRA_ASK_URL=self.ask.url, YANTRA_ASK_TOKEN=self.ask.token,

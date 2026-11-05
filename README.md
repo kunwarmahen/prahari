@@ -532,7 +532,10 @@ looks are kept for `prahari looks` and the page, and nothing is sent.
 A then-turn runs here (`--runner direct`, the default: Yantra as a
 program, its questions put to you in your chat when a Dvara is set) or
 through Dvara as a person (`--runner dvara --as NAME`: their allowance,
-their rules, `came_by: prahari` on Dvara's page). On the Dvara road the
+their rules, `came_by: prahari` on Dvara's page, and the watch's name
+as `label`, so a step on a phone says *Prahari: Mayfield ice cream ·
+asha* on Sparsh's page; here, Yantra is given it as `YANTRA_ASKED_BY`
+for the look and the turn alike). On the Dvara road the
 look goes there too: `POST /call` builds the person's agent with their
 own Setu folder and runs the one call with no model (Dvara's notes/56).
 So a guest's watch reads the guest's mail, never yours, and Dvara can
@@ -595,7 +598,8 @@ src/prahari/
 │                for word), the yes/no for ask, the then-turn (Samay's
 │                direct road); Roads, each watch's look on its own road
 ├── dvara.py     the Dvara road: /call for a look as the person, /notify for
-│                news, /message for a turn as the person (came_by prahari).
+│                news, /message for a turn as the person (came_by prahari,
+│                the watch's name as label, for the phone's log).
 │                Standard library only ([notes/02](notes/02-a-watch-for-everyone.md))
 ├── mailbox.py   mail pushed: a Setu mail account's folder kept open with
 │                IMAP IDLE, each new mail's headers a knock as its person; the

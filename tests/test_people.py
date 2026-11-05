@@ -96,6 +96,8 @@ class TestALookAsThePerson:
         assert body["agent"] == "minder" and body["tool"] == "mcp__gmail__search_threads"
         assert body["allow_tools"] == [
             "mcp__gmail__search_threads(account=asha, query=from:bank)"]
+        # which watch, for the phone's log (Sparsh's page)
+        assert body["came_by"] == "prahari" and body["label"] == watch.name
 
     def test_a_preview_through_dvara_is_granted_nothing(self, tmp_path, dvara):
         store = Store(tmp_path / "p.sqlite3")

@@ -114,7 +114,8 @@ class DvaraCaller:
         tool, args = str(watch.check.get("tool") or ""), watch.check.get("args") or {}
         grant = grant_for(tool, args) if granted else None
         body = {"actor": actor, "agent": watch.agent, "tool": tool, "args": args,
-                "allow_tools": [grant] if grant else []}
+                "allow_tools": [grant] if grant else [], "came_by": "prahari",
+                "label": watch.name or watch.id}
         try:
             data = self.dvara.call("POST", "/call", body, timeout=self.limit)
         except TimeoutError:
@@ -147,6 +148,8 @@ class DvaraRunner:
         body = {"actor": actor, "agent": watch.agent,
                 "thread": f"prahari-{watch.id}-{int(time.time())}",
                 "text": prompt, "unattended": True, "came_by": "prahari",
+                # which watch, for the phone's log (Sparsh's page)
+                "label": watch.name or watch.id,
                 "allow_tools": list(watch.allow_tools), "wait": watch.wait * 60}
         try:
             reply = self.dvara.call("POST", "/message", body, timeout=watch.time_limit

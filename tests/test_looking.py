@@ -127,3 +127,20 @@ class TestTheTurn:
         seen = argv_seen(tmp_path)
         assert "--unattended" in seen and seen[-1] == "do it"
         assert seen[seen.index("--allow-tools") + 1] == "mcp__x__send(to=a)"
+
+
+# -- who asked: the watch, named on the phone's log (Sparsh's page) ----------------
+
+def test_a_look_and_a_turn_tell_yantra_which_watch_asked(tmp_path):
+    script = tmp_path / "env_yantra.py"
+    script.write_text(
+        "import json, os\n"
+        f"open({str(tmp_path / 'env.json')!r}, 'w').write(json.dumps("
+        "os.environ.get('YANTRA_ASKED_BY')))\n"
+        "print(json.dumps({'format': 'yantra.call.v1', 'ok': True, 'text': 'hi'}))\n")
+    named = watch()
+    named.name = "Mayfield ice cream"
+    Caller(tmp_path / "work", command=[sys.executable, str(script)]).call(named)
+    assert json.loads((tmp_path / "env.json").read_text()) == "Prahari: Mayfield ice cream"
+    runner = DirectRunner(tmp_path / "work", command=[sys.executable, str(script)])
+    assert runner.env(named)["YANTRA_ASKED_BY"] == "Prahari: Mayfield ice cream"
