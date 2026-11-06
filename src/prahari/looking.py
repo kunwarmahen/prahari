@@ -12,9 +12,9 @@ tool as it is, and anything else only when ``--allow-tools`` holds a
 grant fixing every argument. A watch's check is exactly such a call, and
 the person said yes to it when they accepted the watch (its card shows
 the call), so the look passes that grant: ``web_fetch(url=https://...)``
-runs, a fetch of any other address does not. A check whose values
-cannot be written as a grant (a quote inside one) runs only if the tool
-reads.
+runs, a fetch of any other address does not. A quote inside a value is
+written ``\\"`` (Yantra reads it back): a bash check that quotes its
+script's path was refused at every look until it could be (2026-11-05).
 
 A QUESTION FOR A MODEL, AND NOTHING ELSE. A watch whose test is ``ask``
 ("is this mail an invoice?") puts one yes/no to a model, with every tool
@@ -132,10 +132,8 @@ def grant_for(tool: str, args: dict) -> str | None:
             text = value.strip()
         else:
             text = json.dumps(value, sort_keys=True, separators=(",", ":"))
-        if '"' in text:
-            return None
-        if any(c in text for c in ',()" ') or not text:
-            text = f'"{text}"'
+        if any(c in text for c in ',()" \\') or not text:
+            text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
         parts.append(f"{key}={text}")
     return f"{tool}(" + ", ".join(parts) + ")"
 

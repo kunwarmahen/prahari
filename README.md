@@ -189,6 +189,9 @@ tool that only reads (a search, a site's page, a screenshot), or the
 exact call you accepted: `web_fetch` of one address is allowed because
 the watch's card showed you that address, and Prahari passes Yantra a
 grant fixing every argument, so a fetch of any other address isn't.
+That holds for a `bash` check too, quotes and all: a command like
+`python3 "/path/outside_temp.py" 35.79 -78.78` is granted exactly as
+written (a quote inside the grant is `\"`), and any other command is not.
 Nothing is granted before you accept, so `preview` can only try a tool
 that reads.
 

@@ -49,8 +49,18 @@ class TestGrants:
         assert grant_for("t", {"q": "from:a newer_than:1d", "n": 3, "f": True}) == \
             't(q="from:a newer_than:1d", n=3, f=true)'
 
-    def test_a_value_with_a_quote_has_no_grant(self):
-        assert grant_for("t", {"q": 'say "hi"'}) is None
+    def test_a_quote_inside_a_value_is_escaped_and_read_back(self):
+        command = 'python3 "/home/x/outside_temp.py" 35.79 -78.78 fahrenheit'
+        grant = grant_for("bash", {"command": command})
+        assert grant == ('bash(command="python3 \\"/home/x/outside_temp.py\\" '
+                         '35.79 -78.78 fahrenheit")')
+        try:
+            from yantra.permissions import parse_grant
+        except ImportError:
+            return
+        assert parse_grant(grant).allows("bash", {"command": command})
+        tricky = 'a\\ "b"\\'
+        assert parse_grant(grant_for("t", {"q": tricky})).allows("t", {"q": tricky})
 
     def test_no_arguments_needs_no_grant(self):
         assert grant_for("t", {}) is None
