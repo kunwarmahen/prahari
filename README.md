@@ -513,7 +513,7 @@ and **Lately**, the last looks across all watches. **New watch** writes
 one by hand, and **Try it** looks once and says what it sees before
 anything is saved.
 
-![Prahari's page: three watches -- a price under a line, new mail, Mum on WhatsApp at the inlet -- then the inlet's address and key, then the latest looks, fired ones in teal](docs/page.png)
+![Prahari's page: three watches -- a price under a line, mail from the bank and Mum on WhatsApp at the inlet -- then the inlet's address and key, the mailboxes, and the latest looks, the newest opened to why it was quiet and what it looked with](docs/page.png)
 
 It listens on localhost only (`--host` to change that), and every API
 request needs the page's token, for the reason Samay's page gives: any
