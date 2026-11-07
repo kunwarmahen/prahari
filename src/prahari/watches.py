@@ -270,7 +270,13 @@ def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
     """A watch of this person's that already looks at the same thing the
     same way: the same call and pick (or the same word at the inlet, heard
     the same way). ONE THING, ONE WATCH: two watches on one fare, told by
-    two names nobody chose, is how a person stops knowing which is which."""
+    two names nobody chose, is how a person stops knowing which is which.
+
+    A BAND IS TWO WATCHES. One number watched from both sides -- heat below
+    60, cool above 70 -- is two lines with two different things to do, and
+    each fires once as its own line is crossed. So a line going the other
+    way (below beside above) is not a twin; a second line the same way is,
+    and is mended into the first."""
     for watch in store.watches(owner=owner):
         if watch.state == "ended":
             continue
@@ -278,9 +284,20 @@ def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
             if watch.listen == parts["listen"] and watch.pick == parts["pick"] \
                     and watch.when == parts["when"]:
                 return watch
-        elif watch.check == parts["check"] and watch.pick == parts["pick"]:
+        elif watch.check == parts["check"] and watch.pick == parts["pick"] \
+                and not _other_side(watch.when, parts["when"]):
             return watch
     return None
+
+
+_DOWN = ("below", "at_most")
+_UP = ("above", "at_least")
+
+
+def _other_side(one: dict, other: dict) -> bool:
+    """Two tests on a number that look from opposite sides of it."""
+    a, b = recipe.test_of(one), recipe.test_of(other)
+    return (a in _DOWN and b in _UP) or (a in _UP and b in _DOWN)
 
 
 def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) -> Watch:

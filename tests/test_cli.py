@@ -39,6 +39,16 @@ class TestAWatchByHand:
         rc, out, _ = run(tmp_path, capsys, "rm", watch_id)
         assert rc == 0 and run(tmp_path, capsys, "list")[1].startswith("no watches")
 
+    def test_a_new_line_is_read_against_the_watchs_own_pick(self, tmp_path, capsys):
+        # The guestroom watch: an ask turned into "below 60" with no --pick.
+        rc, out, _ = run(tmp_path, capsys, "add", "temp", "--check", "web_fetch",
+                         "--args", '{"url": "https://x.example"}', "--pick",
+                         "json:current.temperature_2m", "--when", "changed")
+        watch_id = out.split()[1].rstrip(":")
+        rc, out, err = run(tmp_path, capsys, "edit", watch_id, "--when", "below 60")
+        assert rc == 0, err
+        assert "is below 60" in out
+
     def test_until_stop_and_keep_by_hand(self, tmp_path, capsys):
         rc, out, _ = run(tmp_path, capsys, "add", "AA 1042 lands", "--check", "web_fetch",
                          "--args", '{"url": "https://x.example/aa1042"}', "--pick",

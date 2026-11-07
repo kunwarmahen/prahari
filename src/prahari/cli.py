@@ -272,8 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
-def _recipe(args, pick_default=None) -> dict:
-    """--check/--args/--pick/--when/--every as the recipe's parts."""
+def _recipe(args, pick_default=None, pick_now=None) -> dict:
+    """--check/--args/--pick/--when/--every as the recipe's parts.
+    ``pick_now``: the watch's own pick, which a mended --when or --stop is
+    read against when no new --pick is given (it is not a change itself)."""
     check = None
     if args.check:
         try:
@@ -284,7 +286,8 @@ def _recipe(args, pick_default=None) -> dict:
     elif args.check_args:
         raise watches.WatchError("--args goes with --check TOOL")
     pick = recipe.pick_from_text(args.pick) if args.pick is not None else pick_default
-    when = (recipe.when_from_text(args.when, pick or {}) if args.when is not None
+    reads = pick if pick is not None else (pick_now or {})
+    when = (recipe.when_from_text(args.when, reads) if args.when is not None
             else None)
     renew = None
     if args.renew:
@@ -295,7 +298,7 @@ def _recipe(args, pick_default=None) -> dict:
             raise watches.WatchError(f"--renew-args is not JSON: {exc}") from None
     elif args.renew_args:
         raise watches.WatchError("--renew-args goes with --renew TOOL")
-    stop = (recipe.when_from_text(args.stop, pick or {}) if args.stop else
+    stop = (recipe.when_from_text(args.stop, reads) if args.stop else
             ({} if args.stop == "" else None))
     return {"check": check, "pick": pick, "when": when, "every": args.every,
             "wake": args.wake, "renew": renew, "starts": args.starts, "ends": args.ends,
@@ -454,7 +457,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
             _print_watch(watch, store, full=True)
         return 0
     if cmd == "edit":
-        parts = _recipe(args)
+        parts = _recipe(args, pick_now=watch.pick)
         changes = {k: v for k, v in parts.items() if v is not None}
         for key in ("name", "asked", "thing", "then", "max_per_day", "keep"):
             if getattr(args, key) is not None:

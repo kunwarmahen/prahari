@@ -104,6 +104,17 @@ class TestMadeWhole:
         make(store, owner="asha")                 # someone else's is theirs
         make(store, pick={"number": "Bid"})       # another number on the page is another
 
+    def test_a_band_is_two_watches_but_two_lines_one_way_are_one(self, store):
+        """Heat below 60 and cool above 70 on one temperature: each its own
+        line, each fires once as it is crossed. A second line the same way
+        is still a second name for the first."""
+        make(store)                                         # below 50
+        make(store, name="price high", when={"above": 80})  # the other side: kept
+        with pytest.raises(WatchError, match="already has a watch on exactly this"):
+            make(store, name="price lower", when={"at_most": 40})
+        with pytest.raises(WatchError, match="already has a watch on exactly this"):
+            make(store, name="price higher", when={"at_least": 90})
+
     def test_what_it_is_for_and_what_it_reads(self, store):
         watch = make(store, asked="tell me if ALAB gets cheap", thing="ALAB's price")
         assert watch.asked == "tell me if ALAB gets cheap"

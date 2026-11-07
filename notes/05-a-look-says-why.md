@@ -95,6 +95,22 @@ YES
 The same question with `--no-mcp`, as it went before, never reached a
 model.
 
+## A band is two watches
+
+Fixed, the guestroom watch would still have been the wrong shape. An
+`ask` is asked about every change, and on an hourly temperature every
+look is a change: below 60 all night, the model says YES each hour and
+the thermostat is set to heat each hour, up to the ten a day the limit
+allows. A line needs no model, and fires once as it is crossed.
+
+So **A BAND IS TWO WATCHES**: below 60 → heat, above 70 → cool, the same
+check, one line each, each with a `then` of its own. "One thing, one
+watch" (notes/03) still refuses a second line the *same* way on one
+number, which would be the two-flights-watches muddle again, but a line
+on the other side is a different thing to do, and is allowed. The agent
+is told so in `create_watch`'s description: a number against a line is
+never an `ask`.
+
 ## What was deliberately not built
 
 * **Keeping the whole answer.** 4,000 characters is enough to see why a

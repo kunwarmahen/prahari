@@ -72,7 +72,9 @@ _WHEN = {"type": "object", "description": (
     'again); {"contains": "text"} {"lacks": "text"} {"equals": X} {"matches": '
     '"REGEX"}; {"changed": true}; {"new": true} (items not seen before); {"any": '
     'true}; {"ask": "a yes/no question"} (a model is asked only about what changed '
-    "or is new).")}
+    "or is new). A number against a line is never an ask: a test needs no model. A "
+    "number watched from both sides (heat below 60, cool above 70) is TWO watches on "
+    "the same check, one line each, each with its own then.")}
 _EVERY = {"type": "string", "description": (
     'How often to look: "30m", "3h", "1d" (5 minutes at the least, 7 days at '
     "most). Match how fast the thing changes: mail 15m-1h, a price 1h-6h, a page "

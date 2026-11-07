@@ -72,7 +72,9 @@ mend that one instead. Another test on the same number is a change to
 the watch, not a second watch: two watches on one fare, under names
 nobody chose, is exactly how the person above stopped knowing which was
 which. A different number on the same page (the bid, not the last
-price) is a different pick, and allowed.
+price) is a different pick, and allowed. So is a line on the other side
+of the same number: a band is two watches
+([notes/05](05-a-look-says-why.md)).
 
 ## Live receipt
 

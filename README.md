@@ -505,7 +505,7 @@ is on it, and every day and time their watches say is said on it.
 | `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer, and reads back `asked` as the watch's messages will say it |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
-| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first |
+| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches) |
 | `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
@@ -541,6 +541,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A watch says what it is for** | every message carries your own words and where it looks — `You asked: "keep an eye on the nonstop to Phoenix"` then `(tells you when the fare is below 571; looks at google.com/travel/flights every 6 hours · watch 9b904bc4)`. A watch made with no name is named by its page and line, never after the tool it looks with ([notes/03](notes/03-a-watch-says-what-it-is-for.md)) |
 | **A watch has its days** | `starts`, `ends` and `stop` (a flight that landed): nothing is looked at before it starts, and one whose end came ends and says so, with no yes asked — it was agreed with the watch. Ended, it's kept 30 days, then removed; with no end at all, it asks once a month whether it's still wanted ([notes/04](notes/04-a-watch-has-its-days.md)) |
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
+| **A band is two watches** | one number watched from both sides — heat below 60, cool above 70 — is two watches on the same check, one line each, each with its own `then`. Each fires once as its line is crossed, with no model asked to decide; a second line the *same* way is still refused ([notes/05](notes/05-a-look-says-why.md)) |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
 | **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |
@@ -652,7 +653,7 @@ deploy/
 
 The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
 inlet alone for the public road, the page and the agent's tools work,
-and are covered by 192 tests. The API is not stable.
+and are covered by 194 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
