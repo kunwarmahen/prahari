@@ -75,7 +75,8 @@ nothing from Yantra and has no dependencies of its own.
 How it's built, and why: [01 — a watch with no model](notes/01-a-watch-with-no-model.md);
 [02 — a watch for everyone, mail that knocks, and a door to the street](notes/02-a-watch-for-everyone.md);
 [03 — a watch says what it is for](notes/03-a-watch-says-what-it-is-for.md);
-[04 — a watch has its days](notes/04-a-watch-has-its-days.md).
+[04 — a watch has its days](notes/04-a-watch-has-its-days.md);
+[05 — a look says why](notes/05-a-look-says-why.md).
 
 ## Works with
 
@@ -151,7 +152,8 @@ prahari add "Mail from the bank" --check mcp__gmail__search_threads \
 
 # see, try, mend, stop
 prahari list
-prahari looks                  # newest first, every watch
+prahari looks                  # newest first, every watch, each with why
+prahari looks 1e69 --full      # one watch's looks, with what the check answered
 prahari show 1e69              # one watch in full (the first letters of its id will do)
 prahari look 1e69              # look once, now, here -- and wait
 prahari edit 1e69 --every 2h   # mend its check, pick, test, how often or then
@@ -178,6 +180,21 @@ The price watch fired on its first look because the price was already
 below its line; the second look was quiet, because a test on a value
 fires when it *becomes* true, not every time it *is* true. The mail
 watch's first look only learned what was there.
+
+Every look keeps a sentence saying **why** it ended as it did, which
+`prahari looks` prints under it:
+
+```
+Fri 6 Nov 21:45  quiet      55
+    why: The temperature is 55: it still is below 60, as it did last time. It told
+    you when that became true, and tells again only after it has stopped being true
+    in between
+```
+
+and the start of what the check answered (`--full` shows it). A watch
+that stays quiet when you think it shouldn't usually says why here: the
+pick read something else, the model said no, or the question never got
+an answer ([notes/05](notes/05-a-look-says-why.md)).
 
 Every command takes `--json`.
 
@@ -437,7 +454,11 @@ banned for them.
 `prahari serve` serves a page at the address it prints: every watch in
 words, when it looks next and what it saw last, with **Look now**, an
 **every** box and **Save** to change how often it looks (30m, 3h, 1d;
-no less than 5 minutes), **Pause** / **Resume**, **Looks** (its history) and **Delete**; the
+no less than 5 minutes), **Pause** / **Resume**, **Looks** (its history) and **Delete**.
+Every look opens on a click: why it was quiet, told you or failed, what
+went wrong, the check, the pick and what it picked out, what happened
+then, and what the check answered; a watch's **last:** line opens its
+newest look. Then the
 inlet's address, its key behind **Show**, and the body for MacroDroid;
 and **Lately**, the last looks across all watches. **New watch** writes
 one by hand, and **Try it** looks once and says what it sees before
@@ -511,6 +532,8 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A test on a value fires on its edge** | "below 50" tells you once when the price goes under, not every three hours while it stays there |
 | **New is by key** | the same mail is news once, across restarts |
 | **Ask the model last** | `ask` sends only what changed or is new, never the whole answer every look |
+| **No answer is not a no** | a question the model never answered is a `failed` look, not a quiet one, and the next look asks about the same value again ([notes/05](notes/05-a-look-says-why.md)) |
+| **Every look says why** | quiet, fired, learned or failed, a look keeps one sentence saying why and the start of what the check answered, on the page, in `prahari looks` and to your agent ([notes/05](notes/05-a-look-says-why.md)) |
 | **A broken check never fires** | a tool that failed, or a pick that found nothing (the site moved its price), is `failed` or `broken`, never quiet. Three in a row pause the watch, and you're told how to mend it. A broken look shows the start of what the tool said |
 | **A site that said no isn't a broken recipe** | when a look comes back turned away — a browser look refused (Yantra's `(HTTP 403: … refused this browser` line), or a shop's bot check standing where the page should be ("Verifying the device...", "Just a moment...", "Press & Hold") — the look is `failed`, says so, and is never judged: a pick of all of it would otherwise call the bot check quiet. The first one looks again within the hour; after that the watch keeps its own pace, and it pauses after five turned away in a row, not three. A browser watch turned away is pointed at a spare phone's browser (`mcp__sparsh__open_url`), which most shops let through (Yantra's notes/151) |
 | **A sign-in wall pauses at once** | an expired login doesn't fix itself before the next look |
@@ -594,7 +617,8 @@ src/prahari/
 │                call and pick; preview, which looks once with nothing
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
 ├── clock.py     the rules above; the loop prahari serve runs; a watch's
-│                days (it ends, asks, is removed); the inlet's
+│                days (it ends, asks, is removed); each look's why and
+│                what its check answered ([notes/05](notes/05-a-look-says-why.md)); the inlet's
 │                events; firing: a line that says what it is for, or a
 │                then-turn with what was found marked as outside text
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
@@ -628,10 +652,11 @@ deploy/
 
 The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
 inlet alone for the public road, the page and the agent's tools work,
-and are covered by 153 tests. The API is not stable.
+and are covered by 192 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
-fired and woke the agent.
+fired and woke the agent; an `ask` watch's question, as it sends it,
+answered by the house's model ([notes/05](notes/05-a-look-says-why.md)).
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a

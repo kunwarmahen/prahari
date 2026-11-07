@@ -323,7 +323,8 @@ class Tools:
         return "\n".join(
             f"{look.started_at} {look.outcome}"
             + (f" {look.value}" if look.value else "")
-            + (f" -- {look.detail}" if look.detail else "")
+            + (f" -- why: {look.why}" if look.why else "")
+            + (f" -- {look.detail}" if look.detail and look.detail != look.why else "")
             + (f"\n  found: {'; '.join(look.found[:3])}" if look.found else "")
             for look in looks)
 

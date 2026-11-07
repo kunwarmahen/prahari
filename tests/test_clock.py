@@ -146,6 +146,27 @@ class TestAskTheModelLast:
         clock.close()
         assert outcomes(store, watch) == ["learned", "quiet"]
 
+    def test_no_answer_is_failed_not_quiet_and_asked_again(self, tmp_path):
+        # The guestroom watch: every look "quiet" for hours while the model
+        # was never reached at all.
+        notifier = FakeNotifier()
+        caller = FakeCaller("temp 62.5")
+        asker = FakeAsker(yes=None)
+        store, clock = make_clock(tmp_path, caller, asker=asker, notifier=notifier)
+        watch = watches.create(store, name="temp", check={"tool": "t", "args": {}},
+                               pick={"number": ""}, when={"ask": "under 60?"},
+                               every="1h")
+        clock.look_now(watch.id)
+        caller.say("temp 56.2")
+        for _ in range(3):
+            clock.look_now(watch.id)
+        clock.close()
+        assert outcomes(store, watch) == ["learned"] + ["failed"] * 3
+        assert asker.asked == ["56.2"] * 3     # the same value, asked about again
+        now = store.get(watch.id)
+        assert now.state == "paused" and now.paused_because.startswith("failed 3 times")
+        assert "asked, no answer" in now.paused_because
+
 
 class TestBrokenIsNeverQuiet:
     def test_a_pick_that_finds_nothing_is_broken_and_three_pause_it(self, tmp_path):
@@ -487,3 +508,41 @@ class TestItsDays:
         assert store.get(watch.id).state == "ended"
         back = watches.update(store, watch.id, keep=True)
         assert back.state == "active" and back.ends is None and back.ended_at is None
+
+
+class TestEveryLookSaysWhy:
+    """Opened later, a look says why it was quiet, or why it told you."""
+
+    def test_a_number_test_says_why_each_time(self, tmp_path):
+        caller = FakeCaller("temp 62.5")
+        store, clock = make_clock(tmp_path, caller)
+        watch = watches.create(store, name="cold", check={"tool": "t", "args": {}},
+                               pick={"number": ""}, when={"below": 60}, every="1h",
+                               thing="the temperature")
+        clock.look_now(watch.id)
+        caller.say("temp 56.2")
+        clock.look_now(watch.id)
+        caller.say("temp 55")
+        clock.look_now(watch.id)
+        clock.close()
+        newest, middle, first = store.looks(watch.id, limit=3)
+        assert "62.5" in first.why and "not what it waits for" in first.why
+        assert middle.outcome == "fired" and "is below 60" in middle.why
+        assert newest.outcome == "quiet" and "still is below 60" in newest.why
+        assert newest.said == "temp 55"
+
+    def test_the_models_answer_is_in_the_why(self, tmp_path):
+        caller = FakeCaller("temp 62.5")
+        store, clock = make_clock(tmp_path, caller, asker=FakeAsker(yes=False))
+        watch = watches.create(store, name="t", check={"tool": "t", "args": {}},
+                               pick={"number": ""}, when={"ask": "under 60?"}, every="1h")
+        clock.look_now(watch.id)
+        clock.look_now(watch.id)
+        caller.say("temp 61")
+        clock.look_now(watch.id)
+        clock.close()
+        newest, same, first = store.looks(watch.id, limit=3)
+        assert first.outcome == "learned" and "starts" in first.why
+        assert "same as last time, so the model was not asked" in same.why
+        assert newest.outcome == "quiet" and "'under 60?'" in newest.why
+        assert newest.why.endswith("said NO")

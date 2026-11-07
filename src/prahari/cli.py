@@ -168,9 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("tools", nargs="+", metavar="TOOL")
     p.add_argument("--json", action="store_true", dest="json_out")
 
-    p = sub.add_parser("looks", help="what was seen, newest first")
+    p = sub.add_parser("looks", help="what was seen, newest first, and why each look "
+                                     "was quiet, told you, or failed")
     p.add_argument("id", nargs="?")
     p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--full", action="store_true",
+                   help="also what the check answered, and the agent's reply")
     p.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("hear", help="send the inlet something, here, and wait for it")
@@ -365,7 +368,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
         if not looks:
             print("no looks yet")
         for look in looks:
-            _print_look(look, with_watch=not args.id)
+            _print_look(look, with_watch=not args.id, full=args.full)
         return 0
     if cmd == "hear":
         try:
@@ -757,7 +760,7 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
               f"for {watch.owner}")
 
 
-def _print_look(look: Look, with_watch: bool) -> None:
+def _print_look(look: Look, with_watch: bool, full: bool = False) -> None:
     head = f"{look.watch}  " if with_watch else ""
     turn = f"  then: {look.turn}" if look.turn else ""
     sent = "  sent" if look.notified else ""
@@ -767,8 +770,22 @@ def _print_look(look: Look, with_watch: bool) -> None:
     pad = " " * len(head)
     for line in look.found[:5]:
         print(f"{pad}    • {line}")
-    if look.detail and look.outcome not in ("quiet", "fired"):
+    if look.why:
+        print(f"{pad}    why: {look.why}")
+    if look.detail and look.outcome not in ("quiet", "fired", "learned"):
         print(f"{pad}    {look.detail}")
+    if full:
+        came = f"came by: {look.came_by}"
+        run = f"   Dvara run: {look.dvara_run_id}" if look.dvara_run_id else ""
+        print(f"{pad}    {came}{run}")
+        if look.said:
+            print(f"{pad}    the check answered:")
+            for line in look.said.splitlines()[:40]:
+                print(f"{pad}      {line}")
+        if look.reply:
+            print(f"{pad}    the agent said:")
+            for line in look.reply.splitlines()[:40]:
+                print(f"{pad}      {line}")
 
 
 if __name__ == "__main__":

@@ -17,7 +17,12 @@ Every rule here exists because of a way an unwatched watch goes wrong:
   ``seen``), so the same mail is news once, across restarts.
 * ASK THE MODEL LAST. ``ask`` sends only a value that changed, or items
   that are new, to a model as a yes/no -- never the whole result every
-  look. Ninety-nine looks in a hundred ask nobody anything.
+  look. Ninety-nine looks in a hundred ask nobody anything. NO ANSWER IS
+  NOT A NO: a question that went unanswered is a ``failed`` look, and
+  the next look asks about the same value again.
+* EVERY LOOK SAYS WHY. Quiet, fired, learned or failed, a look keeps one
+  sentence on why (``why``) and the start of what the check answered
+  (``said``), so a person can see for themselves why a watch stayed quiet.
 * A BROKEN CHECK NEVER FIRES. A tool that failed, or a pick that found
   nothing in what it said (the site moved its price), is ``broken`` or
   ``failed``: never news, never "nothing new" either. Three in a row
@@ -98,6 +103,8 @@ PHONE_TOOL = "mcp__sparsh__open_url"
 #: How much of a tool's answer a broken look shows, so the person sees
 #: what came back instead of being told only that the pick missed.
 SAID_SHOWN = 200
+#: How much of what the check answered is kept with each look, for its details.
+SAID_KEPT = 4000
 #: After a refusal, the next look comes this soon at the latest: a daily
 #: watch that met a bad moment shouldn't wait a day to try again.
 REFUSED_AGAIN = timedelta(hours=1)
@@ -349,15 +356,22 @@ class Clock:
             if called.needs:
                 look.outcome = "needs_person"
                 look.detail = "; ".join(called.needs)
+                look.why = ("The check could not run without you (a sign-in or a yes), "
+                            "so the watch is paused until you see to it")
                 self._pause(watch, look, f"needs you: {look.detail}")
                 return self._done(watch, look)
             if called.busy:
                 look.outcome = "quiet"
                 look.detail = "busy: " + "; ".join(called.busy)
+                look.why = ("What the check needs was busy (in use elsewhere), so this "
+                            "look was skipped; the next one tries again")
                 return self._done(watch, look)
             if not called.ok:
                 look.outcome = "failed"
                 look.detail = called.detail or "the check failed"
+                look.why = ("The check itself did not work, so nothing was decided; "
+                            "what went wrong is below")
+                look.said = (called.text or "")[:SAID_KEPT]
                 self._trouble(watch, look)
                 return self._done(watch, look)
             self._decide(self.store.get(watch.id) or watch, look, called.text)
@@ -414,10 +428,13 @@ class Clock:
                heard: str = "") -> bool:
         """What the check (or the event) said, decided. True if it fired.
         ``heard``: an inlet event in a line, which is what is told."""
+        look.said = text[:SAID_KEPT]
         turned = _turned_away(text) if not inlet else ""
         if turned:
             look.outcome = "failed"
             look.detail = turned
+            look.why = ("The site turned the look away (a bot check or a refusal), so "
+                        "nothing on it was judged")
             current = self.store.get(watch.id)
             if current is not None and current.trouble == 0:
                 # One quick try again; after that the watch keeps its own
@@ -433,6 +450,8 @@ class Clock:
         picked = recipe.apply(watch.pick, text)
         if not picked.found:
             look.outcome = "broken"
+            look.why = ("The check answered, but the pick found nothing in its answer, so "
+                        "nothing was decided; what it answered is below")
             look.detail = ("the check answered, but its pick found nothing in it "
                            f"(pick {json.dumps(watch.pick) or 'all'}); the page or "
                            "the tool's answer may have changed. It said: "
@@ -448,13 +467,26 @@ class Clock:
         matters = False
         found: list[str] = []
         candidate = ""
+        thing, shown = _thing(watch), picked.shown()
+        rule = recipe.when_words(watch.when)
+        # Why this look ended as it did, in one sentence, for whoever opens
+        # it later to see why it was quiet (or why it told them).
+        why = ""
 
         if test in recipe.EDGED:
             now_true = bool(recipe.holds(watch.when, picked))
             matters = now_true and (watch.armed or inlet)
             changes["armed"] = not now_true
             if matters:
-                found = [f"{_thing(watch)} is now {picked.shown()}"]
+                found = [f"{thing} is now {shown}"]
+                why = f"{thing} is {shown}, so it {rule}" + (
+                    "" if inlet else ", and it did not last time")
+            elif now_true:
+                why = (f"{thing} is {shown}: it still {rule}, as it did last time. It told "
+                       "you when that became true, and tells again only after it has "
+                       "stopped being true in between")
+            else:
+                why = f"{thing} is {shown}, which is not what it waits for ({rule})"
         elif picked.items or recipe.pick_kind(watch.pick) in ("items", "items_json"):
             fresh = self.store.unseen(watch.id, [i.key for i in picked.items])
             self.store.remember(watch.id, [i.key for i in picked.items], self.now())
@@ -465,27 +497,57 @@ class Clock:
                 found = [i.line for i in news][:recipe.ITEMS_CAP]
                 matters = test in ("new", "any")
                 candidate = "\n".join(found)
+                why = f"{len(news)} of the {len(picked.items)} item(s) are new"
+            else:
+                why = (f"{len(picked.items)} item(s), none new: each was seen on an "
+                       "earlier look")
         else:
             changed = picked.stored() != watch.last_value
             if test == "any":
                 matters = True
-                found = [picked.shown()]
-                candidate = picked.shown()
+                found = [shown]
+                candidate = shown
+                why = f"it tells every time, and {thing} is {shown}"
             elif changed and not first:
-                found = [f"was {_was(watch.last_value)}, now {picked.shown()}"]
+                found = [f"was {_was(watch.last_value)}, now {shown}"]
                 matters = test == "changed"
                 candidate = str(picked.value)
+                why = f"{thing} was {_was(watch.last_value)}, now {shown}"
             elif inlet:
-                found = [picked.shown()]
+                found = [shown]
                 candidate = str(picked.value)
+            else:
+                why = f"{thing} is {shown}, the same as last time" + (
+                    ", so the model was not asked" if test == "ask" else "")
 
         if test == "ask" and candidate and (not first or inlet):
-            matters = self._asked(watch, look, candidate)
+            answer = self._asked(watch, look, candidate)
+            if answer is None:
+                # No answer is not a no: written down as failed (so it is
+                # seen, and three in a row pause it and say so), and what was
+                # seen is not kept, so the next look asks about it again.
+                look.outcome = "failed"
+                look.why = (f"{thing} is {shown}; the model was asked "
+                            f"{watch.when['ask']!r} but gave no answer, so nothing was "
+                            "decided. The next look asks again")
+                changes.pop("last_value", None)
+                changes.pop("trouble", None)
+                self.store.update(watch.id, **changes)
+                self._trouble(watch, look)
+                self._done(watch, look)
+                return False
+            matters = answer
+            why = (f"{why}; the model was asked {watch.when['ask']!r} about it and said "
+                   f"{'YES' if answer else 'NO'}")
         self.store.update(watch.id, **changes)
+        look.why = why[:1].upper() + why[1:] if why else ""
 
         if first and not inlet and not matters:
             look.outcome = "learned"
             look.detail = "the first look: what is there now is remembered"
+            look.why = (f"The first look: {why}" if test in recipe.EDGED else
+                        f"The first look: {thing} is {shown}, remembered as where it "
+                        "starts. Only a change from here can tell you")
             self._done(watch, look)
             return False
         if not matters:
@@ -495,15 +557,16 @@ class Clock:
         look.found = ([heard] if heard and not picked.items else found)[:recipe.ITEMS_CAP]
         return self._fire(watch, look)
 
-    def _asked(self, watch: Watch, look: Look, candidate: str) -> bool:
+    def _asked(self, watch: Watch, look: Look, candidate: str) -> bool | None:
+        """The model's yes or no; None when no answer came."""
         if self.asker is None:
             look.detail = "no model to ask is set up here"
-            return False
+            return None
         yes, cost, why = self.asker.ask(watch, str(watch.when["ask"]), candidate)
         look.cost_usd += cost
         if yes is None:
             look.detail = f"asked, no answer: {why}"
-        return bool(yes)
+        return yes
 
     # -- firing ------------------------------------------------------------
 
@@ -511,6 +574,8 @@ class Clock:
         day_ago = self.now() - timedelta(days=1)
         if self.store.fired_since(watch.id, day_ago) >= watch.max_per_day:
             look.outcome = "limited"
+            look.why = (f"{look.why + '. ' if look.why else ''}It mattered, but this watch "
+                        f"already told you {watch.max_per_day} times in the last day")
             look.detail = (f"it mattered, but this watch has fired {watch.max_per_day} "
                            "times in the last day, its most; kept, not run")
             if self.store.limited_since(watch.id, day_ago) == 0:

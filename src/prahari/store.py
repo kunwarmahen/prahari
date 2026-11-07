@@ -167,6 +167,10 @@ class Look:
     notified: bool = False
     cost_usd: float = 0.0
     dvara_run_id: str = ""
+    #: Why it ended as it did, in a sentence ("62 is not below 60").
+    why: str = ""
+    #: The start of what the check answered, as it came.
+    said: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -271,6 +275,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("stop", "TEXT NOT NULL DEFAULT '{}'"), ("ended_at", "TEXT"),
                     ("kept_at", "TEXT"), ("still_asked_at", "TEXT"),
                     ("zone", "TEXT NOT NULL DEFAULT ''")),
+          "look": (("why", "TEXT NOT NULL DEFAULT ''"),
+                   ("said", "TEXT NOT NULL DEFAULT ''")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
 
 

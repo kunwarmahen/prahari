@@ -108,6 +108,21 @@ header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margi
 .looks .found { margin: 4px 0 0 18px; padding: 0; color: var(--ink-2); }
 .looks .found li { border: 0; padding: 1px 0; }
 .looks details { margin-top: 4px; }
+.looks > li > details > summary { cursor: pointer; list-style: none; }
+.looks > li > details > summary::-webkit-details-marker { display: none; }
+.looks > li > details > summary::before { content: "▸"; color: var(--ink-3); margin-right: 6px; }
+.looks > li > details[open] > summary::before { content: "▾"; }
+.looks .why { color: var(--ink-2); margin: 3px 0 0 18px; }
+.looks details[open] > summary .why { display: none; }
+.looks dl.full { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px;
+                 margin: 8px 0 4px 18px; font-size: 13px; }
+.looks dl.full dt { color: var(--ink-3); }
+.looks dl.full dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.looks dl.full code { background: var(--sunk); padding: 1px 5px; border-radius: 5px; }
+.open-last { cursor: pointer; }
+.open-last:hover { text-decoration: underline dotted; }
+@media (max-width: 520px) { .looks dl.full { grid-template-columns: 1fr; }
+                            .looks dl.full dd { margin-bottom: 6px; } }
 .looks pre { white-space: pre-wrap; background: var(--sunk); border-radius: 8px; padding: 10px;
              font: 13px/1.45 var(--sans); }
 .empty { color: var(--ink-3); }
@@ -223,6 +238,8 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
                        $("error").classList.remove("hidden"); }
   let lookingAt = null;
   let names = {};
+  let byId = {};
+  let openFirst = false;
 
   async function status() {
     const s = await api("GET", "status");
@@ -236,6 +253,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   async function list() {
     const { watches } = await api("GET", "watches");
     names = Object.fromEntries(watches.map((w) => [w.id, w.name]));
+    byId = Object.fromEntries(watches.map((w) => [w.id, w]));
     const box = $("watches");
     if (!watches.length) {
       box.innerHTML = `<p class="empty">No watches yet. Ask your agent "tell me when…", or ` +
@@ -255,7 +273,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
         ${w.asked ? `<div class="asked">You asked: “${esc(w.asked)}”</div>` : ""}
         <div class="says">${esc(w.sentence)}. ${esc(w.does)}.</div>
         ${w.paused_because ? `<div class="paused-why">${esc(w.paused_because)}</div>` : ""}
-        <div class="last">${last ? `last: <span class="out ${esc(last.outcome)}">${esc(words[last.outcome] || last.outcome)}</span> ${when(last.started_at)} ${esc(last.value)}` : (w.listen ? "nothing heard yet" : "not looked yet")}
+        <div class="last ${last ? "open-last" : ""}" ${last ? 'data-act="last" title="Why? Open this look"' : ""}>${last ? `last: <span class="out ${esc(last.outcome)}">${esc(words[last.outcome] || last.outcome)}</span> ${when(last.started_at)} ${esc(last.value)}` : (w.listen ? "nothing heard yet" : "not looked yet")}
           ${w.next_at && !w.listen && w.state === "active" ? ` · next look ${when(w.next_at)}` : ""}</div>
         <div class="acts">
           ${w.listen ? "" : `<button class="btn link" data-act="look">Look now</button>`}
@@ -273,15 +291,47 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     const { looks } = await api("GET", path);
     $("looks-of").textContent = lookingAt ? `of ${lookingAt.name}` : "";
     $("looks-all").classList.toggle("hidden", !lookingAt);
-    $("looks").innerHTML = looks.length ? looks.map((l) => `<li>
-      <span class="when">${when(l.started_at)}</span>
+    $("looks").innerHTML = looks.length ? looks.map((l, i) => `<li><details ${openFirst && i === 0 ? "open" : ""}>
+      <summary><span class="when">${when(l.started_at)}</span>
       <span class="out ${esc(l.outcome)}">${esc(words[l.outcome] || l.outcome)}</span>
       ${lookingAt ? "" : `<b>${esc(names[l.watch] || l.watch)}</b> ·`} ${esc(l.value)}
       ${l.turn ? ` · then: ${esc(l.turn)}` : ""}${l.notified ? " · sent" : ""}
+      ${l.why ? `<div class="why">${esc(l.why)}</div>` : ""}</summary>
+      ${lookInFull(l)}</details>
       ${l.found.length ? `<ul class="found">${l.found.slice(0, 5).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
-      ${l.detail && !["quiet", "fired"].includes(l.outcome) ? `<div class="empty">${esc(l.detail)}</div>` : ""}
-      ${l.reply ? `<details><summary>What the agent said</summary><pre>${esc(l.reply)}</pre></details>` : ""}
       </li>`).join("") : `<li class="empty">Nothing yet.</li>`;
+    openFirst = false;
+  }
+
+  // Everything kept about one look, so the person can see for themselves
+  // why it was quiet, told them, or failed.
+  const cameBy = { clock: "its own clock", now: "you asked (Look now)", inlet: "a knock on the inlet",
+                   wake: "woken by a knock", renew: "keeping its push alive" };
+  const turnWords = { ok: "the agent did it", failed: "the agent's turn failed",
+    refused: "the agent was refused a tool", held: "held for your yes",
+    needs_person: "the agent needs you", timed_out: "the agent ran out of time",
+    told: "told you, no agent turn" };
+  function took(a, b) { if (!a || !b) return ""; const s = (new Date(b) - new Date(a)) / 1000;
+    return s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`; }
+  function lookInFull(l) {
+    const w = byId[l.watch] || {};
+    const rows = [];
+    const row = (k, v) => { if (v) rows.push(`<dt>${k}</dt><dd>${v}</dd>`); };
+    row("Why", esc(l.why || "(this look was made before looks said why)"));
+    if (l.detail && l.detail !== l.why) row(["failed", "broken", "needs_person", "limited"].includes(l.outcome)
+                                            ? "What went wrong" : "Note", esc(l.detail));
+    row("Came by", esc(cameBy[l.came_by] || l.came_by));
+    row("When", `${when(l.started_at)}${l.ended_at ? ` · took ${took(l.started_at, l.ended_at)}` : ""}`);
+    if (w.check) row("Looked with", `<code>${esc(w.check.tool)}</code> <code>${esc(JSON.stringify(w.check.args || {}))}</code>`);
+    if (w.pick) row("Picked out", `<code>${esc(JSON.stringify(w.pick))}</code> → ${esc(l.value || "nothing")}`);
+    if (w.when) row("Tells you when", `<code>${esc(JSON.stringify(w.when))}</code>`);
+    if (l.turn) row("Then", esc(turnWords[l.turn] || l.turn) + (l.notified ? " · a message was sent" : " · no message sent"));
+    else if (l.notified) row("Then", "a message was sent");
+    if (l.cost_usd) row("Cost", `$${l.cost_usd.toFixed(4)}`);
+    if (l.dvara_run_id) row("Dvara run", `<code>${esc(l.dvara_run_id)}</code>`);
+    return `<dl class="full">${rows.join("")}</dl>
+      ${l.said ? `<details><summary>What the check answered</summary><pre>${esc(l.said)}</pre></details>` : ""}
+      ${l.reply ? `<details><summary>What the agent said</summary><pre>${esc(l.reply)}</pre></details>` : ""}`;
   }
 
   async function inlet() {
@@ -327,12 +377,14 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   }
 
   $("watches").addEventListener("click", async (e) => {
-    const btn = e.target.closest("button[data-act]"); if (!btn) return;
+    const btn = e.target.closest("button[data-act], .open-last"); if (!btn) return;
     const row = btn.closest(".watch"); const id = row.dataset.id;
     const name = row.querySelector(".name").textContent;
     try {
       const act = btn.dataset.act;
-      if (act === "looks") { lookingAt = { id, name }; await looks(); $("looks").scrollIntoView({ behavior: "smooth" }); return; }
+      if (act === "looks" || act === "last") {
+        lookingAt = { id, name }; openFirst = act === "last";
+        await looks(); $("looks").scrollIntoView({ behavior: "smooth" }); return; }
       if (act === "delete" && !confirm(`Delete "${name}", its looks and what it saw?`)) return;
       if (act === "delete") await api("DELETE", `watches/${id}`);
       else if (act === "every") {

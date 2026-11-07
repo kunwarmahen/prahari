@@ -242,8 +242,11 @@ class Asker:
             "<<<", shown, ">>>"])
         where = self.work / (watch.id or "preview")
         where.mkdir(parents=True, exist_ok=True)
+        # Only session flags here: --no-mcp belongs to --eval, and Yantra
+        # turns a session away that has it, so every ask went unanswered.
+        # An empty --cwd remembers no servers; YANTRA_DISABLED_TOOLS does the rest.
         argv = [*command, "--cwd", str(where), "--json", "--unattended", "--no-skills",
-                "--no-mcp", "--no-setu", "--no-samay", "--no-sparsh", "--memory", "off",
+                "--no-setu", "--no-samay", "--no-sparsh", "--no-prahari", "--memory", "off",
                 "--learn", "off", "--reflect", "off", "--prompt", prompt]
         env = {**os.environ, "YANTRA_DISABLED_TOOLS": "*", "YANTRA_ENV_CONTEXT": "off",
                "YANTRA_UNATTENDED": "1"}
