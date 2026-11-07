@@ -196,6 +196,55 @@ that stays quiet when you think it shouldn't usually says why here: the
 pick read something else, the model said no, or the question never got
 an answer ([notes/05](notes/05-a-look-says-why.md)).
 
+### Both sides of a number: two watches
+
+*"Heat the guestroom below 60 °F outside, cool it above 70 °F"* is two
+watches on one check, one line each, each with a `then` of its own. A
+line needs no model and fires once as it is crossed. An `ask` would put
+the question to a model on every hourly change instead
+([notes/05](notes/05-a-look-says-why.md#a-band-is-two-watches)):
+
+```bash
+prahari add "Guestroom heat when below 60°F" --check web_fetch \
+  --args '{"url": "https://api.open-meteo.com/v1/forecast?latitude=35.79&longitude=-78.78&current=temperature_2m&temperature_unit=fahrenheit"}' \
+  --pick 'json:current.temperature_2m' --when 'below 60' --every 1h \
+  --thing "the outside temperature" \
+  --asked "heat the guestroom below 60 outside, cool it above 70" \
+  --runner dvara --agent minder --as owner \
+  --then "The outside temperature has gone below 60°F. Set the guestroom thermostat to heat: call mcp__homeassistant-home__call_service with domain='climate', service='set_hvac_mode', entity_id='climate.guestroom_thermostat', data={'hvac_mode': 'heat'}. Keep the existing setpoint. Then tell the person the outside temperature (give the value) and that the guestroom thermostat is now set to heat."
+
+prahari add "Guestroom cool when above 70°F" --check web_fetch \
+  --args '{"url": "https://api.open-meteo.com/v1/forecast?latitude=35.79&longitude=-78.78&current=temperature_2m&temperature_unit=fahrenheit"}' \
+  --pick 'json:current.temperature_2m' --when 'above 70' --every 1h \
+  --thing "the outside temperature" \
+  --asked "heat the guestroom below 60 outside, cool it above 70" \
+  --runner dvara --agent minder --as owner \
+  --then "The outside temperature has gone above 70°F. Set the guestroom thermostat to cool: call mcp__homeassistant-home__call_service with domain='climate', service='set_hvac_mode', entity_id='climate.guestroom_thermostat', data={'hvac_mode': 'cool'}. Keep the existing setpoint. Then tell the person the outside temperature (give the value) and that the guestroom thermostat is now set to cool."
+```
+
+The second one is let in although it shares the first's check and pick,
+because its line is on the other side. A second `below` on the same
+number would be refused as the same watch. Use the entity id your Home
+Assistant shows for the thermostat. Change a line later with `prahari
+edit ID --when 'above 72'`, rather than adding the watch again.
+
+A `--runner dvara` watch asks Dvara for its agents when it is made, so
+`add` needs `PRAHARI_DVARA_URL` and `PRAHARI_DVARA_TOKEN` in the shell
+it runs in. When Prahari runs in Sarathi's containers and you type at
+your own terminal, Dvara is on 127.0.0.1:8770 and the token is the
+container's:
+
+```bash
+PRAHARI_DVARA_URL=http://127.0.0.1:8770 \
+PRAHARI_DVARA_TOKEN=$(podman exec sarathi-prahari printenv PRAHARI_DVARA_TOKEN) \
+prahari add "Guestroom cool when above 70°F" --check web_fetch …
+```
+
+The watch is kept in `~/.prahari`, the same file the container reads,
+and the container's `prahari serve` looks at it from then on. Watches
+asked for in a chat need none of this: the agent makes them through
+Prahari itself.
+
 Every command takes `--json`.
 
 ### A recipe
@@ -575,7 +624,7 @@ offer watches to everyone.
 | `PRAHARI_STATE` | where watches and looks are kept (default `~/.prahari`; also `--state`) |
 | `PRAHARI_YANTRA` | the command that starts Yantra; may be several words |
 | `PRAHARI_YANTRA_HOME` | the folder Yantra starts in, for its `.env` |
-| `PRAHARI_DVARA_URL`, `PRAHARI_DVARA_TOKEN` | where Dvara is, and its `DVARA_TOKEN`: news is sent, and `--runner dvara` works |
+| `PRAHARI_DVARA_URL`, `PRAHARI_DVARA_TOKEN` | where Dvara is, and its `DVARA_TOKEN`: news is sent, and `--runner dvara` works (`add` asks Dvara for its agents, so it needs them too) |
 | `PRAHARI_DVARA_ACTOR` | who a watch made here is for |
 | `PRAHARI_MAX_WATCHES` | how many watches one person may have (default 30) |
 | `PRAHARI_TOKEN` | the page's token, instead of the one kept in the state folder |

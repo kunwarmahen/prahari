@@ -111,6 +111,33 @@ on the other side is a different thing to do, and is allowed. The agent
 is told so in `create_watch`'s description: a number against a line is
 never an `ask`.
 
+The guestroom, as two watches (the `add` commands in full are in the
+README, under *Both sides of a number*):
+
+```
+$ prahari add "Guestroom cool when above 70°F" --check web_fetch … --when 'above 70' …
+added 9a92df06: Guestroom cool when above 70°F -- every hour, looks at
+api.open-meteo.com/v1/forecast (with web_fetch); tells you when the outside
+temperature is above 70 (once each time it becomes true)
+
+$ prahari looks 43dff0b2 --full
+Fri 6 Nov 21:19  fired      56  then: ok  sent
+    why: The outside temperature is 56, so it is below 60, and it did not last time
+    came by: clock   Dvara run: 827f74dc3015
+    the agent said:
+      It's 56°F outside in Cary now, so I set the guestroom thermostat to heat
+      (keeping the existing setpoint). It'll warm up through the night.
+Fri 6 Nov 22:19  quiet      54.7
+
+$ prahari looks 9a92df06
+Fri 6 Nov 22:28  learned    53.8
+    why: The first look: the outside temperature is 53.8, which is not what it
+    waits for (is above 70)
+```
+
+One turn of the agent for the evening's crossing, and none for the hours
+it stayed below 60: no model was asked by either watch.
+
 ## What was deliberately not built
 
 * **Keeping the whole answer.** 4,000 characters is enough to see why a
