@@ -11,6 +11,11 @@
     DELETE /api/watches/ID
     GET    /api/inlet                      the inlet's addresses and key, for a sender
     GET    /api/mailboxes                  the mail folders kept open (no passwords)
+    GET    /api/indriyas                   every shared reading, with its value and age
+    GET    /api/indriyas/NAME              one, by name or id
+    GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
+    POST   /api/indriyas/NAME/look         read it now (202 at once)
+    POST   /api/indriyas/NAME/pause | /resume
 
     POST   /inlet/WORD                     something to hear (an inlet key);
                                           202 at once, with how many watches heard
@@ -71,7 +76,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from prahari import watches
+from prahari import indriyas, watches
 from prahari.clock import Clock
 from prahari.status import report
 from prahari.store import Store
@@ -171,7 +176,8 @@ class Api:
             return self._route(method, parts, query, body)
         except watches.WatchError as exc:
             message = str(exc)
-            raise ApiError(404 if message.startswith("no watch") else 400, message) from None
+            raise ApiError(404 if message.startswith(("no watch", "no indriya")) else 400,
+                           message) from None
 
     def _route(self, method, parts, query, body) -> tuple[int, dict]:
         if parts == ["status"] and method == "GET":
@@ -192,7 +198,8 @@ class Api:
                 every=str(body.get("every") or ""), sample=body.get("sample"),
                 agent=str(body.get("agent") or ""), wake=str(body.get("wake") or ""),
                 renew=body.get("renew"), thing=str(body.get("thing") or ""),
-                starts=body.get("starts"), ends=body.get("ends"), stop=body.get("stop"))
+                starts=body.get("starts"), ends=body.get("ends"), stop=body.get("stop"),
+                store=self.store, sense=str(body.get("sense") or ""), home=self.clock.home)
         if parts == ["looks"] and method == "GET":
             limit = _int(query.get("limit", ["50"])[0], "limit")
             watch_id = query.get("watch", [None])[0]
@@ -227,6 +234,27 @@ class Api:
                 except RuntimeError as exc:
                     raise ApiError(409, str(exc)) from None
                 return 202, {"looking": watch.id}
+        if parts == ["indriyas"] and method == "GET":
+            return 200, {"indriyas": [indriyas.card(i, self.store)
+                                      for i in self.store.indriyas()]}
+        if len(parts) >= 2 and parts[0] == "indriyas":
+            indriya = indriyas.find(self.store, parts[1])
+            if len(parts) == 2 and method == "GET":
+                return 200, indriyas.card(indriya, self.store)
+            if parts[2:] == ["readings"] and method == "GET":
+                limit = _int(query.get("limit", ["50"])[0], "limit")
+                return 200, {"readings": [r.as_dict() for r in
+                                          self.store.readings(indriya.id, min(limit, 500))]}
+            if parts[2:] == ["look"] and method == "POST":
+                try:
+                    self.clock.start_reading(indriya.id)
+                except RuntimeError as exc:
+                    raise ApiError(409, str(exc)) from None
+                return 202, {"reading": indriya.id}
+            if parts[2:] == ["pause"] and method == "POST":
+                return 200, indriyas.card(indriyas.pause(self.store, indriya), self.store)
+            if parts[2:] == ["resume"] and method == "POST":
+                return 200, indriyas.card(indriyas.resume(self.store, indriya), self.store)
         raise ApiError(404, f"no such endpoint: {method} /api/{'/'.join(parts)}")
 
     def _create(self, body: dict):
@@ -240,6 +268,7 @@ class Api:
             when=body.get("when"), every=str(body.get("every") or ""),
             wake=str(body.get("wake") or ""), renew=body.get("renew"),
             then=str(body.get("then") or ""), asked=str(body.get("asked") or ""),
+            sense=str(body.get("sense") or ""), home=self.clock.home,
             thing=str(body.get("thing") or ""), starts=body.get("starts"),
             ends=body.get("ends"), stop=body.get("stop"), owner=str(body.get("as")
                                                         or watches.LOCAL_OWNER),

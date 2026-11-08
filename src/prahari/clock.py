@@ -49,6 +49,17 @@ Every rule here exists because of a way an unwatched watch goes wrong:
   -- ``failed``, counted, three in a row pause -- because a push that
   stopped is a watch that has gone back to looking every ``every``.
 
+* AN INDRIYA READS, AND ITS WATCHES DECIDE. An indriya (a shared
+  reading, indriyas.py) is looked at on its own ``every`` exactly as a
+  watch's check would be -- same road, same grant, same walls -- and
+  keeps what it picked, with a time on it. It decides nothing. Each
+  watch that senses it is then handed the whole answer and judged by the
+  rules above, as if it had looked itself: one call out, any number of
+  watches. A reading that failed is written on each sensing watch's
+  looks (so "why so quiet?" has an answer there too) but counted only
+  against the indriya: three in a row pause IT, and its owner is told
+  which watches went quiet with it.
+
 WHAT A FIRE DOES is the watch's ``then``. Empty: the person is told what
 it saw, in a line, with no model at all. Otherwise the agent is given
 ``then`` with what was found -- inside a block marked as text from
@@ -70,7 +81,7 @@ from typing import Protocol
 
 from prahari import recipe
 from prahari.looking import Asker, Called, Caller, TurnResult
-from prahari.store import Look, Store, Watch, from_iso, iso, now_utc
+from prahari.store import Indriya, Look, Reading, Store, Watch, from_iso, iso, now_utc
 
 #: An ended watch is kept this long, then removed with its looks.
 ENDED_KEPT = timedelta(days=30)
@@ -133,7 +144,8 @@ class Clock:
                  asker: Asker | None = None, notifier: Notifier | None = None,
                  now: Callable[[], datetime] = now_utc, workers: int = WORKERS,
                  on_record: Callable[[Watch, Look], None] | None = None,
-                 home: set[str] | None = None) -> None:
+                 home: set[str] | None = None,
+                 on_reading: Callable[[Indriya, Reading], None] | None = None) -> None:
         self.store = store
         self.caller = caller
         self.runners = runners
@@ -141,6 +153,7 @@ class Clock:
         self.notifier = notifier
         self.now = now
         self.on_record = on_record
+        self.on_reading = on_reading
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="prahari")
         self._looking: set[str] = set()
         #: Watches knocked while they looked: one more look each, after.
@@ -166,7 +179,9 @@ class Clock:
 
     def sleep_for(self) -> float:
         upcoming = [from_iso(w.next_at) for w in self.store.watches(state="active")
-                    if w.next_at and not w.listen]
+                    if w.next_at and w.check]
+        upcoming += [from_iso(i.next_at) for i in self.store.indriyas(state="active")
+                     if i.next_at]
         upcoming += [from_iso(w.ends) for w in self.store.watches(state="active") if w.ends]
         upcoming += [from_iso(w.renew_at) for w in self.store.watches(state="active")
                      if w.renew and w.renew_at]
@@ -186,10 +201,16 @@ class Clock:
                 self.store.update(watch.id, renew_at=iso(now + RENEW_EVERY))
                 started.append(self._pool.submit(self._renew, watch))
             due = from_iso(watch.next_at)
-            if watch.listen or due is None or due > now or self._busy(watch.id):
+            if not watch.check or due is None or due > now or self._busy(watch.id):
                 continue
             self._claim(watch, now)
             started.append(self._submit(watch, "clock"))
+        for indriya in self.store.indriyas(state="active"):
+            due = from_iso(indriya.next_at)
+            if due is None or due > now or self._busy(indriya.id):
+                continue
+            self._claim_reading(indriya, now)
+            started.append(self._submit_reading(indriya, "clock"))
         return started
 
     def calendar(self, now: datetime) -> None:
@@ -245,12 +266,135 @@ class Clock:
             raise KeyError(watch_id)
         if watch.listen:
             raise RuntimeError(f"{watch.id} listens at the inlet; it has nothing to look at")
+        if watch.sense:
+            sensed = self.store.get_indriya(watch.sense)
+            raise RuntimeError(f"{watch.id} senses an indriya and has nothing to look at "
+                               "itself; read it now with: prahari indriya look "
+                               f"{sensed.name if sensed else watch.sense}")
         if self._busy(watch.id):
             raise RuntimeError(f"{watch.id} is looking already")
         # A look now is the look: the next one is a whole step from now,
         # not the old due time a minute later.
         self._claim(watch, self.now())
         return self._submit(watch, "now")
+
+    # -- indriyas ----------------------------------------------------------
+
+    def read_now(self, indriya_id: str) -> Reading:
+        """One reading at once, here, waited for (``prahari indriya look``)."""
+        return self.start_reading(indriya_id).result()
+
+    def start_reading(self, indriya_id: str) -> Future:
+        indriya = self.store.get_indriya(indriya_id)
+        if indriya is None:
+            raise KeyError(indriya_id)
+        if self._busy(indriya.id):
+            raise RuntimeError(f"{indriya.name} is reading already")
+        self._claim_reading(indriya, self.now())
+        return self._submit_reading(indriya, "now")
+
+    def _claim_reading(self, indriya: Indriya, now: datetime) -> None:
+        self.store.update_indriya(indriya.id, next_at=iso(now + recipe.every(indriya.every)))
+
+    def _submit_reading(self, indriya: Indriya, came_by: str) -> Future:
+        with self._lock:
+            self._looking.add(indriya.id)
+        return self._pool.submit(self._read, indriya, came_by)
+
+    def _read(self, indriya: Indriya, came_by: str) -> Reading:
+        """Read once; keep what was picked; hand the answer to its watches."""
+        from prahari.indriyas import probe
+
+        try:
+            reading = Reading(id="", indriya=indriya.id, at=iso(self.now()))
+            try:
+                called = self.caller.call(probe(indriya))
+            except Exception as exc:       # a runner's bug is a failed reading
+                called = Called(ok=False, detail=f"{type(exc).__name__}: {exc}")
+            text = called.text or ""
+            reading.said = text[:SAID_KEPT]
+            turned = _turned_away(text) if called.ok else ""
+            if called.needs:
+                reading.outcome = "needs_person"
+                reading.detail = "; ".join(called.needs)
+                reading.why = ("The call could not run without you (a sign-in or a yes), "
+                               "so the indriya is paused until you see to it")
+            elif called.busy:
+                reading.outcome = "busy"
+                reading.detail = "busy: " + "; ".join(called.busy)
+                reading.why = "What the call needs was in use elsewhere; the next one tries"
+            elif not called.ok or turned:
+                reading.outcome = "failed"
+                reading.detail = turned or called.detail or "the call failed"
+                reading.why = ("The site turned the reading away (a bot check or a "
+                               "refusal)" if turned else "The call itself did not work")
+            else:
+                picked = recipe.apply(indriya.pick, text)
+                if picked.found:
+                    reading.value, reading.stored = picked.shown(), picked.stored()
+                    reading.why = f"Read {reading.value}"
+                else:
+                    reading.outcome = "broken"
+                    reading.why = ("The call answered, but the pick found nothing in it; "
+                                   "the page or the tool's answer may have changed")
+                    reading.detail = ("pick found nothing; it said: "
+                                      + " ".join(text.split())[:SAID_SHOWN])
+            self.store.add_reading(reading)
+            if reading.outcome == "read":
+                self.store.update_indriya(indriya.id, value=reading.value,
+                                          stored=reading.stored, read_at=reading.at,
+                                          trouble=0)
+            elif reading.outcome == "needs_person":
+                self._pause_indriya(indriya, f"needs you: {reading.detail}")
+            elif reading.outcome in ("failed", "broken"):
+                current = self.store.get_indriya(indriya.id) or indriya
+                count = current.trouble + 1
+                self.store.update_indriya(indriya.id, trouble=count)
+                if count >= MAX_TROUBLE:
+                    self._pause_indriya(current, f"{reading.outcome} {count} times in a "
+                                                 f"row; last: {reading.detail}")
+            if self.on_reading is not None:
+                try:
+                    self.on_reading(indriya, reading)
+                except Exception:
+                    pass
+            if reading.outcome != "busy":
+                self._pass_down(indriya, reading, text)
+            return reading
+        finally:
+            with self._lock:
+                self._looking.discard(indriya.id)
+
+    def _pass_down(self, indriya: Indriya, reading: Reading, text: str) -> None:
+        """Each watch that senses it, judged on what it read -- or told,
+        on its own looks, why there was nothing to judge."""
+        for watch in self.store.watches(state="active", sense=indriya.id):
+            if not _started(watch, self.now()):
+                continue
+            look = self.store.start_look(watch.id, "indriya", self.now())
+            if reading.outcome == "read":
+                self._decide(watch, look, text)
+                continue
+            look.outcome = "failed"
+            look.detail = reading.detail
+            look.why = (f"Its indriya {indriya.name} could not read ({reading.outcome}), so "
+                        "nothing was decided; the indriya keeps count, not this watch")
+            look.said = reading.said
+            self._done(watch, look)
+
+    def _pause_indriya(self, indriya: Indriya, because: str) -> None:
+        from prahari.indriyas import probe
+
+        current = self.store.get_indriya(indriya.id)
+        if current is None or current.state != "active":
+            return
+        self.store.update_indriya(indriya.id, state="paused", paused_because=because)
+        using = self.store.watches(sense=indriya.id)
+        quiet = ("\nWatches that go quiet with it: "
+                 + ", ".join(w.name for w in using)) if using else ""
+        self._send(probe(indriya), f"Paused: indriya {indriya.name}\n{because}{quiet}\n"
+                   "Say so in a chat with me and I'll mend it, or resume it with: "
+                   f"prahari indriya resume {indriya.name}")
 
     # -- the inlet ---------------------------------------------------------
 
@@ -588,7 +732,7 @@ class Clock:
         look.outcome = "fired"
         if not watch.then:
             look.turn = "told"
-            look.notified = self._send(watch, _message(watch, look))
+            look.notified = self._send(watch, _message(watch, look, self.store))
             self._done(watch, look)
             return True
         # The turn takes minutes: written down as fired now, finished later.
@@ -603,7 +747,7 @@ class Clock:
                                 detail=f"no {watch.runner} runner is set up here")
         else:
             try:
-                result = runner.run(watch, compose(watch, look))
+                result = runner.run(watch, compose(watch, look, self.store))
             except Exception as exc:
                 result = TurnResult(ok=False, stop_reason="error",
                                     detail=f"{type(exc).__name__}: {exc}")
@@ -632,7 +776,7 @@ class Clock:
                 f"To let it next time: prahari allow {watch.id} '{tools[0]}'"]))
         elif look.turn in ("failed", "timed_out", "needs_person"):
             why = "; ".join(result.needs) or result.detail or look.turn
-            look.notified = self._send(watch, f"{_message(watch, look)}\n\n"
+            look.notified = self._send(watch, f"{_message(watch, look, self.store)}\n\n"
                                               f"(The agent couldn't finish: {why})")
         look.detail = result.detail
         self.store.finish_look(look, self.now())
@@ -680,7 +824,7 @@ class Clock:
                 pass
 
 
-def compose(watch: Watch, look: Look) -> str:
+def compose(watch: Watch, look: Look, store: Store | None = None) -> str:
     """The then-turn's prompt: the watch's own words, and what it found,
     marked as text from outside."""
     from prahari.watches import sentence
@@ -689,7 +833,7 @@ def compose(watch: Watch, look: Look) -> str:
     if len(look.found) > FOUND_SHOWN:
         found += f"\n(and {len(look.found) - FOUND_SHOWN} more)"
     return "\n".join([
-        f"(Prahari, watching for the person: \"{watch.name}\" -- {sentence(watch)}. "
+        f"(Prahari, watching for the person: \"{watch.name}\" -- {sentence(watch, store)}. "
         + (f"They asked for it in these words: \"{watch.asked}\". " if watch.asked else "")
         + "It just saw what it was waiting for. Nobody is watching right now; your "
         "answer is sent to the person.)",
@@ -698,7 +842,7 @@ def compose(watch: Watch, look: Look) -> str:
         "<<<", found, ">>>)"])
 
 
-def _message(watch: Watch, look: Look) -> str:
+def _message(watch: Watch, look: Look, store: Store | None = None) -> str:
     lines = [f"{watch.name}:"]
     shown = look.found[:FOUND_SHOWN] or [look.value]
     lines += [f"• {line}" for line in shown]
@@ -706,14 +850,21 @@ def _message(watch: Watch, look: Look) -> str:
         lines.append(f"(and {len(look.found) - FOUND_SHOWN} more)")
     if watch.asked:
         lines.append(f"You asked: \"{watch.asked}\"")
-    lines.append(f"({_about(watch)} · watch {watch.id})")
+    lines.append(f"({_about(watch, store)} · watch {watch.id})")
     return "\n".join(lines)
 
 
-def _about(watch: Watch) -> str:
+def _about(watch: Watch, store: Store | None = None) -> str:
     """Why this came, in a line: a name alone may not say what is watched."""
     if watch.listen:
         return f"heard at Prahari's inlet as {watch.listen}"
+    if watch.sense:
+        sensed = store.get_indriya(watch.sense) if store is not None else None
+        return (f"tells you when {recipe.thing_words(watch.pick, watch.thing)} "
+                f"{recipe.when_words(watch.when)}; read by the indriya "
+                f"{sensed.name if sensed else watch.sense}"
+                + (f", which looks at {recipe.where_words(sensed.check)} every "
+                   f"{recipe.duration_words(recipe.every(sensed.every))}" if sensed else ""))
     return (f"tells you when {recipe.thing_words(watch.pick, watch.thing)} "
             f"{recipe.when_words(watch.when)}; looks at {recipe.where_words(watch.check)} "
             f"every {recipe.duration_words(recipe.every(watch.every))}")

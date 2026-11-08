@@ -3,7 +3,8 @@
     prahari mcp --for mahen [--agent DIR|NAME] [--runner direct|dvara]
 
 An MCP server on stdin/stdout -- newline-delimited JSON-RPC, by hand,
-like Samay's -- with ten tools:
+like Samay's -- with fifteen tools, ten for watches and five for
+indriyas (shared readings):
 
     preview_watch     read    try a recipe once; what it sees, in words
     list_watches      read    this person's watches
@@ -16,6 +17,18 @@ like Samay's -- with ten tools:
     resume_watch      write
     allow_for_watch   write   let its then-turn use a tool without asking
     delete_watch      write
+    list_indriyas     read    the readings this person may use, with their
+                              values and how old each is
+    read_indriya      read    one reading now, and its recent history
+    create_indriya    write   keep a reading up to date (one call, a pick, how
+                              often), for any number of watches to sense
+    update_indriya    write   mend one: its call, pick, how often, who sees it
+    delete_indriya    write   (refused while a watch senses it)
+
+A READING BEFORE A CALL. An agent asked "how cold is it outside?" that
+finds a fresh indriya answers from it, with no call out at all; and a
+watch on the same number as an indriya SENSES it (``sense``) instead of
+looking again.
 
 THE AGENT WRITES THE RECIPE; THE PERSON ACCEPTS IT. The four reads say
 ``readOnlyHint: true`` and the rest do not, so a harness that honours the
@@ -48,7 +61,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TextIO
 
-from prahari import __version__, watches
+from prahari import __version__, indriyas, watches
 from prahari.status import serving
 from prahari.store import Store
 
@@ -112,6 +125,14 @@ _THING = {"type": "string", "description": (
     "\"BTC's price\". Messages say \"the fare is now 58\" instead of \"the "
     "number\".")}
 
+_SENSE = {"type": "string", "description": (
+    "The name of an indriya (a shared reading, from list_indriyas) to decide on, "
+    "INSTEAD of a check: the watch looks at nothing itself and is judged on each of "
+    "the indriya's readings. Give no check and no every with it; the pick defaults "
+    "to the indriya's own.")}
+_INDRIYA_NAME = {"type": "string", "description": (
+    "One short lowercase word, letters, digits and dashes: outside-temp, btc-price")}
+
 TOOLS: list[dict] = [
     {"name": "preview_watch",
      "description": (
@@ -126,6 +147,7 @@ TOOLS: list[dict] = [
          "asked": _ASKED, "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "listen": {"type": "string", "description": "for an inlet watch instead "
                     "of a check: the one word a sender posts to (whatsapp)"},
+         "sense": _SENSE,
          "wake": _WAKE,
          "sample": {"type": "object", "description": "an event like the sender's, "
                     "to try an inlet watch on"}}},
@@ -165,7 +187,7 @@ TOOLS: list[dict] = [
          "asked": _ASKED, "thing": _THING,
          "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
-         "listen": {"type": "string"},
+         "listen": {"type": "string"}, "sense": _SENSE,
          "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
          "allow_tools": {"type": "array", "items": {"type": "string"}},
@@ -217,6 +239,54 @@ TOOLS: list[dict] = [
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}},
                      "required": ["id"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": True}},
+    {"name": "list_indriyas",
+     "description": (
+         "The shared readings (indriyas) this person may use -- their own and the "
+         "house's -- each with its value now and how old it is. When a fresh one "
+         "answers what the person asked (\"how cold is it outside?\"), answer from it "
+         "instead of calling the tool again. A watch on the same number senses it."),
+     "inputSchema": {"type": "object", "properties": {}},
+     "annotations": {"readOnlyHint": True}},
+    {"name": "read_indriya",
+     "description": "One indriya's value now, how old it is, and its recent readings.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string", "description": "its name (or id)"},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 50,
+                   "description": "how many past readings (default 5)"}},
+         "required": ["name"]},
+     "annotations": {"readOnlyHint": True}},
+    {"name": "create_indriya",
+     "description": (
+         "Keep a reading up to date: one call of a tool that READS, a pick, how often. "
+         "Use it when the same number is wanted by more than one watch, or the person "
+         "asks for it often. Try the check and pick with preview_watch first, tell "
+         "the person what it sees, and create only if they say yes. Then make watches "
+         "with sense: NAME instead of a check. share: house lets everyone in the "
+         "house read its value (never call as this person); ask before choosing it."),
+     "inputSchema": {"type": "object", "properties": {
+         "name": _INDRIYA_NAME, "thing": _THING, "check": _CHECK, "pick": _PICK,
+         "every": {"type": "string", "description": "how often it reads: 15m (default), "
+                   "1h"},
+         "share": {"type": "string", "enum": ["mine", "house"]}},
+         "required": ["name", "check"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False}},
+    {"name": "update_indriya",
+     "description": (
+         "Mend one of the person's indriyas -- most often after it paused because its "
+         "pick found nothing: preview a new pick first. A new check or pick starts the "
+         "watches that sense it over."),
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string"}, "thing": _THING, "check": _CHECK, "pick": _PICK,
+         "every": {"type": "string"},
+         "share": {"type": "string", "enum": ["mine", "house"]}},
+         "required": ["name"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False}},
+    {"name": "delete_indriya",
+     "description": "Remove an indriya and its readings, for good. Refused while a "
+                    "watch senses it: remove those watches first.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}},
+                     "required": ["name"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": True}},
 ]
 
 
@@ -263,7 +333,8 @@ class Tools:
                                wake=str(args.get("wake") or ""), renew=args.get("renew"),
                                thing=str(args.get("thing") or ""),
                                starts=args.get("starts"), ends=args.get("ends"),
-                               stop=args.get("stop"), store=self.store, zone=self.zone)
+                               stop=args.get("stop"), store=self.store, zone=self.zone,
+                               sense=str(args.get("sense") or ""), home=self.home)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
         asked = str(args.get("asked") or "").strip()
         if asked:
@@ -347,13 +418,14 @@ class Tools:
             asked=str(args.get("asked") or ""), thing=str(args.get("thing") or ""),
             starts=args.get("starts"), ends=args.get("ends"), stop=args.get("stop"),
             zone=self.zone, listen=str(args.get("listen") or ""), pick=args.get("pick"),
+            sense=str(args.get("sense") or ""), home=self.home,
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
             then=str(args.get("then") or ""), owner=self.person, runner=self.runner,
             agent=self.agent, allow_tools=[str(g) for g in allow],
             max_per_day=int(args.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY),
             created_via="agent", dvara=self.dvara if self.runner == "dvara" else None)
-        said = f"Saved {made.id}: {made.name} -- {watches.sentence(made)}."
+        said = f"Saved {made.id}: {made.name} -- {watches.sentence(made, self.store)}."
         if serving(self.state) is None:
             said += (" Note: Prahari is not running on this machine, so it will not "
                      "look until `prahari serve` is started -- tell the person.")
@@ -366,14 +438,14 @@ class Tools:
                    if k in args}
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
                                **changes)
-        return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch)}."
+        return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch, self.store)}."
 
     def _pause_watch(self, args: dict) -> str:
         return f"Paused {watches.pause(self.store, self._mine(args).id).id}."
 
     def _resume_watch(self, args: dict) -> str:
         watch = watches.resume(self.store, self._mine(args).id)
-        return f"Resumed {watch.id}: {watches.sentence(watch)}."
+        return f"Resumed {watch.id}: {watches.sentence(watch, self.store)}."
 
     def _allow_for_watch(self, args: dict) -> str:
         allow = args.get("allow_tools") or []
@@ -385,6 +457,64 @@ class Tools:
     def _delete_watch(self, args: dict) -> str:
         watch = watches.remove(self.store, self._mine(args).id)
         return f"Deleted {watch.id} ({watch.name})."
+
+    # -- indriyas ----------------------------------------------------------
+
+    def _list_indriyas(self, args: dict) -> str:
+        found = indriyas.visible(self.store, self.person, self.home)
+        if not found:
+            return ("No indriyas yet. When a number is wanted by more than one watch, or "
+                    "asked for often, offer one (create_indriya).")
+        lines = []
+        for indriya in found:
+            whose = "" if indriya.owner in self._names() else f" ({indriya.owner}'s)"
+            lines.append(f"{indriyas.reading_line(indriya)}{whose} -- "
+                         f"{indriyas.sentence(indriya)}")
+        return "\n".join(lines)
+
+    def _read_indriya(self, args: dict) -> str:
+        indriya = self._indriya(args)
+        limit = max(1, min(int(args.get("limit") or 5), 50))
+        lines = [f"{indriyas.reading_line(indriya)} -- {indriyas.sentence(indriya)}"]
+        for reading in self.store.readings(indriya.id, limit=limit):
+            lines.append(f"  {reading.at} {reading.outcome}"
+                         + (f" {reading.value}" if reading.value else "")
+                         + (f" -- {reading.why}" if reading.outcome != "read" else ""))
+        return "\n".join(lines)
+
+    def _create_indriya(self, args: dict) -> str:
+        made = indriyas.create(
+            self.store, name=str(args.get("name") or ""), check=args.get("check"),
+            pick=args.get("pick"), every=str(args.get("every") or ""),
+            thing=str(args.get("thing") or ""), share=str(args.get("share") or "mine"),
+            owner=self.person, runner=self.runner, agent=self.agent,
+            created_via="agent", dvara=self.dvara if self.runner == "dvara" else None)
+        said = (f"Saved indriya {made.name}: {indriyas.sentence(made)}. Watches decide on "
+                f"it with sense: \"{made.name}\".")
+        if serving(self.state) is None:
+            said += (" Note: Prahari is not running on this machine, so it will not "
+                     "read until `prahari serve` is started -- tell the person.")
+        return said
+
+    def _update_indriya(self, args: dict) -> str:
+        indriya = self._indriya(args, own=True)
+        changes = {k: args[k] for k in ("check", "pick", "every", "thing", "share")
+                   if k in args}
+        indriya = indriyas.update(self.store, indriya.id, **changes)
+        return f"Updated indriya {indriya.name}: {indriyas.sentence(indriya)}."
+
+    def _delete_indriya(self, args: dict) -> str:
+        indriya = indriyas.remove(self.store, self._indriya(args, own=True))
+        return f"Deleted indriya {indriya.name}."
+
+    def _indriya(self, args: dict, own: bool = False):
+        wanted = str(args.get("name") or args.get("id") or "").strip()
+        if not wanted:
+            raise ToolFailed("missing: name")
+        return indriyas.find(self.store, wanted, self.person, self.home, own_only=own)
+
+    def _names(self) -> set[str]:
+        return {self.person} | (self.home if self.person in self.home else set())
 
     def _mine(self, args: dict):
         wanted = str(args.get("id") or "").strip()

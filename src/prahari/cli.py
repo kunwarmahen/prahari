@@ -17,6 +17,14 @@
                                                 a mail folder kept open (IMAP IDLE), its
                                                 login in Setu (setu connect mail)
     prahari mailbox list | rm NAME
+    prahari indriya add outside-temp --check weather_now --args '{"place": "Cary"}' \\
+          --pick number --every 15m --thing "the outside temperature" [--share house]
+                                                a shared reading: one call, any number
+                                                of watches and agents read it
+    prahari add "Heat the guestroom" --sense outside-temp --when 'below 60'
+                                                a watch that decides on its readings
+    prahari indriya list | get NAME | readings NAME | look NAME
+    prahari indriya edit NAME --every 30m | pause NAME | resume NAME | rm NAME
     prahari hear WORD JSON [--for WHO]          try the inlet without the network
     prahari serve [--port 8782] [--inlet-port 8783]
                                                 the watch, its page and the inlet (and
@@ -47,14 +55,14 @@ import sys
 import threading
 from pathlib import Path
 
-from prahari import __version__, mailbox, mcp, recipe, version, watches
+from prahari import __version__, indriyas, mailbox, mcp, recipe, version, watches
 from prahari.clock import Clock
 from prahari.dvara import Dvara, DvaraCaller, DvaraError, DvaraNotifier, DvaraRunner
 from prahari.http import (DEFAULT_PORT, Api, PrahariServer, inlet_token, public_inlet,
                           serve_token)
 from prahari.looking import Asker, Caller, DirectRunner, Roads
 from prahari.status import hold_watch, prahari_command, report, serving
-from prahari.store import Look, Store, Watch, from_iso
+from prahari.store import Indriya, Look, Reading, Store, Watch, from_iso
 
 
 def state_dir(flag: str | None) -> Path:
@@ -106,6 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("preview", help="try a recipe once, and say what it sees")
     recipe_flags(p, needed=True)
     p.add_argument("--listen", default="", metavar="WORD")
+    p.add_argument("--sense", default="", metavar="INDRIYA",
+                   help="decide on an indriya's readings instead of looking")
     p.add_argument("--sample", default=None, metavar="JSON",
                    help="an event to try a --listen watch on")
     p.add_argument("--agent", default="", metavar="DIR|NAME")
@@ -123,6 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     recipe_flags(p, needed=True)
     p.add_argument("--listen", default="", metavar="WORD",
                    help="hear this word at the inlet instead of looking")
+    p.add_argument("--sense", default="", metavar="INDRIYA",
+                   help="decide on an indriya's readings instead of looking (it has "
+                        "no --check or --every of its own)")
     p.add_argument("--then", default="", metavar="PROMPT",
                    help="what the agent is asked when it fires (default: just tell you)")
     p.add_argument("--agent", default="", metavar="DIR|NAME",
@@ -175,6 +188,51 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full", action="store_true",
                    help="also what the check answered, and the agent's reply")
     p.add_argument("--json", action="store_true", dest="json_out")
+
+    p = sub.add_parser("indriya", help="shared readings: one call, read by any number "
+                                       "of watches and agents")
+    isub = p.add_subparsers(dest="indriya_command", required=True)
+    i = isub.add_parser("add", help="a reading kept up to date")
+    i.add_argument("name", help="one short word it is called by (outside-temp)")
+    i.add_argument("--check", metavar="TOOL", required=True,
+                   help="the tool it reads with (it must read, or be this exact call)")
+    i.add_argument("--args", metavar="JSON", default=None, dest="check_args")
+    i.add_argument("--pick", default=None,
+                   help="what it keeps out of the answer: number[:REGEX], text:REGEX, "
+                        "json:PATH ... (default: all of it)")
+    i.add_argument("--every", default=indriyas.DEFAULT_EVERY,
+                   help=f"how often it reads (default {indriyas.DEFAULT_EVERY})")
+    i.add_argument("--thing", default="", metavar="WORDS",
+                   help="what it reads: 'the outside temperature'")
+    i.add_argument("--share", choices=("mine", "house"), default="mine",
+                   help="house: anyone's watches and agents may read its value (never "
+                        "call as you)")
+    i.add_argument("--agent", default="", metavar="DIR|NAME")
+    i.add_argument("--runner", choices=("direct", "dvara"), default="direct")
+    i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR")
+    i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("edit", help="mend one: its call, pick, how often, who sees it")
+    i.add_argument("name")
+    i.add_argument("--check", metavar="TOOL", default=None)
+    i.add_argument("--args", metavar="JSON", default=None, dest="check_args")
+    i.add_argument("--pick", default=None)
+    i.add_argument("--every", default=None)
+    i.add_argument("--thing", default=None, metavar="WORDS")
+    i.add_argument("--share", choices=("mine", "house"), default=None)
+    i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("list", help="every indriya and what it read last")
+    i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("readings", help="what it read, newest first")
+    i.add_argument("name")
+    i.add_argument("--limit", type=int, default=20)
+    i.add_argument("--json", action="store_true", dest="json_out")
+    for name, text in (("get", "its value now, with how old it is"),
+                       ("look", "read once, now, and wait"),
+                       ("pause", "stop reading, keep it"), ("resume", "read again, from now"),
+                       ("rm", "remove it and its readings (not while a watch senses it)")):
+        i = isub.add_parser(name, help=text)
+        i.add_argument("name")
+        i.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("hear", help="send the inlet something, here, and wait for it")
     p.add_argument("word")
@@ -308,7 +366,9 @@ def _recipe(args, pick_default=None, pick_now=None) -> dict:
 def _dispatch(args, store: Store, state: Path) -> int:
     cmd = args.command
     if cmd == "preview":
-        parts = _recipe(args, {})
+        sensed = indriyas.find(store, args.sense, watches.LOCAL_OWNER, _home()) \
+            if args.sense else None
+        parts = _recipe(args, sensed.pick if sensed else {})
         sample = None
         if args.sample:
             try:
@@ -317,12 +377,14 @@ def _dispatch(args, store: Store, state: Path) -> int:
                 sample = {"text": args.sample}
         said = watches.preview(_caller(state), check=parts["check"], listen=args.listen,
                                pick=parts["pick"], when=parts["when"],
-                               every=parts["every"] or ("" if args.listen else "1h"),
+                               every=parts["every"] or ("" if args.listen or sensed
+                                                        else "1h"),
                                sample=sample, agent=args.agent, runner=args.runner,
                                owner=args.as_actor or watches.LOCAL_OWNER,
                                wake=parts["wake"] or "", renew=parts["renew"],
                                starts=parts["starts"], ends=parts["ends"],
-                               stop=parts["stop"], store=store)
+                               stop=parts["stop"], store=store,
+                               sense=sensed.id if sensed else "", home=_home())
         if args.json_out:
             print(json.dumps(said))
         else:
@@ -334,11 +396,14 @@ def _dispatch(args, store: Store, state: Path) -> int:
                 print("\nwhat the tool said:\n" + said["result"])
         return 0
     if cmd == "add":
-        parts = _recipe(args, {})
+        owner = args.as_actor or watches.LOCAL_OWNER
+        sensed = indriyas.find(store, args.sense, owner, _home()) if args.sense else None
+        parts = _recipe(args, sensed.pick if sensed else {})
         watch = watches.create(
             store, name=args.name, check=parts["check"], listen=args.listen,
+            sense=sensed.id if sensed else "", home=_home(),
             pick=parts["pick"], when=parts["when"],
-            every=parts["every"] or ("" if args.listen else "1h"),
+            every=parts["every"] or ("" if args.listen or sensed else "1h"),
             wake=parts["wake"] or "", renew=parts["renew"], then=args.then,
             asked=args.asked, thing=args.thing, starts=parts["starts"], ends=parts["ends"],
             stop=parts["stop"], owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
@@ -348,7 +413,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
         if args.json_out:
             print(json.dumps(watches.card(watch)))
         else:
-            print(f"added {watch.id}: {watch.name} -- {watches.sentence(watch)}")
+            print(f"added {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
             if serving(state) is None:
                 print("prahari serve is not running: nothing is looked at until it is")
         return 0
@@ -415,6 +480,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
         return _inlet(args, store, state)
     if cmd == "mailbox":
         return _mailbox(args, store, state)
+    if cmd == "indriya":
+        return _indriya(args, store, state)
     if cmd == "mcp":
         tools = mcp.Tools(store, state, _caller(state), person=args.person,
                           agent=args.agent, runner=args.runner, dvara=_dvara(),
@@ -466,7 +533,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
             changes["wake"], changes["renew"] = "", {}
         watch = watches.update(store, watch.id, **changes)
         print(json.dumps(watches.card(watch)) if args.json_out
-              else f"updated {watch.id}: {watch.name} -- {watches.sentence(watch)}")
+              else f"updated {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
         return 0
     if cmd == "pause":
         watch = watches.pause(store, watch.id)
@@ -475,7 +542,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
     if cmd == "resume":
         watch = watches.resume(store, watch.id)
         print(json.dumps(watches.card(watch)) if args.json_out
-              else f"resumed {watch.id}: {watches.sentence(watch)}")
+              else f"resumed {watch.id}: {watches.sentence(watch, store)}")
         return 0
     if cmd == "allow":
         watch = watches.allow(store, watch.id, args.tools)
@@ -536,14 +603,14 @@ def _logins() -> mailbox.Logins:
     return mailbox.Logins(home=_home(), dvara=_dvara())
 
 
-def _clock(state: Path, store: Store, on_record=None) -> Clock:
+def _clock(state: Path, store: Store, on_record=None, on_reading=None) -> Clock:
     dvara = _dvara()
     runners: dict = {"direct": DirectRunner(state / "work", ask=dvara)}
     if dvara is not None:
         runners["dvara"] = DvaraRunner(dvara)
     return Clock(store, _caller(state), runners, asker=Asker(state / "work"),
                  notifier=DvaraNotifier(dvara) if dvara is not None else None,
-                 on_record=on_record, home=_home())
+                 on_record=on_record, home=_home(), on_reading=on_reading)
 
 
 def _inlet(args, store: Store, state: Path) -> int:
@@ -584,6 +651,115 @@ def _inlet(args, store: Store, state: Path) -> int:
     if not url:
         print("prahari serve is not running: nothing is heard until it is")
     return 0
+
+
+def _indriya(args, store: Store, state: Path) -> int:
+    """``prahari indriya ...``: this computer's person's readings, and the
+    house's (read-only, unless they are this person's)."""
+    sub = args.indriya_command
+    home = _home()
+    if sub == "add":
+        given = _json_args(args.check_args)
+        made = indriyas.create(
+            store, name=args.name, check={"tool": args.check, "args": given},
+            pick=recipe.pick_from_text(args.pick) if args.pick is not None else {},
+            every=args.every, thing=args.thing, share=args.share,
+            owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
+            agent=args.agent, dvara=_dvara() if args.runner == "dvara" else None)
+        if args.json_out:
+            print(json.dumps(indriyas.card(made, store)))
+        else:
+            print(f"added indriya {made.name}: {indriyas.sentence(made)}")
+            print(f"watches decide on it with: prahari add NAME --sense {made.name} "
+                  "--when ...")
+            if serving(state) is None:
+                print("prahari serve is not running: nothing is read until it is")
+        return 0
+    if sub == "list":
+        found = indriyas.visible(store, watches.LOCAL_OWNER, home)
+        if args.json_out:
+            print(json.dumps([indriyas.card(i, store) for i in found]))
+            return 0
+        if not found:
+            print("no indriyas (prahari indriya add NAME --check TOOL --args JSON "
+                  "--pick ... --every 15m)")
+        for indriya in found:
+            _print_indriya(indriya, store)
+        return 0
+    indriya = indriyas.find(store, args.name, watches.LOCAL_OWNER, home,
+                            own_only=sub in ("edit", "pause", "resume", "rm", "look"))
+    if sub == "get":
+        if args.json_out:
+            print(json.dumps(indriyas.card(indriya, store)))
+        else:
+            _print_indriya(indriya, store, full=True)
+        return 0
+    if sub == "readings":
+        found = store.readings(indriya.id, limit=args.limit)
+        if args.json_out:
+            print(json.dumps([r.as_dict() for r in found]))
+            return 0
+        if not found:
+            print("no readings yet")
+        for reading in found:
+            _print_reading(reading)
+        return 0
+    if sub == "edit":
+        changes = {"pick": recipe.pick_from_text(args.pick) if args.pick is not None
+                   else None, "every": args.every, "thing": args.thing,
+                   "share": args.share}
+        if args.check:
+            changes["check"] = {"tool": args.check, "args": _json_args(args.check_args)}
+        elif args.check_args:
+            changes["check"] = {"tool": indriya.check["tool"],
+                                "args": _json_args(args.check_args)}
+        indriya = indriyas.update(store, indriya.id, **changes)
+        print(json.dumps(indriyas.card(indriya, store)) if args.json_out
+              else f"updated indriya {indriya.name}: {indriyas.sentence(indriya)}")
+        return 0
+    if sub == "pause":
+        indriya = indriyas.pause(store, indriya)
+        print(json.dumps(indriyas.card(indriya)) if args.json_out
+              else f"paused indriya {indriya.name}")
+        return 0
+    if sub == "resume":
+        indriya = indriyas.resume(store, indriya)
+        print(json.dumps(indriyas.card(indriya)) if args.json_out
+              else f"resumed indriya {indriya.name}: {indriyas.sentence(indriya)}")
+        return 0
+    if sub == "rm":
+        indriyas.remove(store, indriya)
+        print(json.dumps({"removed": indriya.id}) if args.json_out
+              else f"removed indriya {indriya.name}")
+        return 0
+    if sub == "look":
+        clock = _clock(state, store)
+        try:
+            reading = clock.read_now(indriya.id)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            clock.close()
+        if args.json_out:
+            print(json.dumps(reading.as_dict()))
+        else:
+            _print_reading(reading)
+            for watch in store.watches(sense=indriya.id):
+                for look in store.looks(watch.id, limit=1):
+                    _print_look(look, with_watch=True)
+        return 0 if reading.outcome == "read" else 1
+    raise AssertionError(sub)
+
+
+def _json_args(raw: str | None) -> dict:
+    try:
+        given = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise watches.WatchError(f"--args is not JSON: {exc}") from None
+    if not isinstance(given, dict):
+        raise watches.WatchError("--args is one JSON object")
+    return given
 
 
 def _mailbox(args, store: Store, state: Path) -> int:
@@ -645,10 +821,17 @@ def _serve(store: Store, state: Path, *, host: str, port: int,
         _print_look(look, with_watch=True)
         sys.stdout.flush()
 
+    def read(indriya: Indriya, reading: Reading) -> None:
+        print(f"indriya {indriya.name}  ", end="")
+        _print_reading(reading)
+        sys.stdout.flush()
+
     def started(interrupted: int) -> None:
         active = store.watches(state="active")
         dvara = _dvara()
-        print(f"prahari {__version__}: {len(active)} active watch(es), state in {state}")
+        senses = store.indriyas(state="active")
+        print(f"prahari {__version__}: {len(active)} active watch(es)"
+              + (f", {len(senses)} indriya(s)" if senses else "") + f", state in {state}")
         if server is not None:
             print(f"page: {server.page_url}")
             print(f"inlet: {server.url}inlet/WORD  (key: prahari inlet)")
@@ -668,7 +851,7 @@ def _serve(store: Store, state: Path, *, host: str, port: int,
                   "interrupted")
         sys.stdout.flush()
 
-    clock = _clock(state, store, on_record=log)
+    clock = _clock(state, store, on_record=log, on_reading=read)
     api = Api(store, clock, state, _dvara(), inlet_key=inlet_token(state))
     alone = None
     if port:
@@ -734,7 +917,7 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
     print(f"{watch.id}  {watch.state:<7} {watch.name}")
     if watch.asked:
         print(f"          asked: \"{watch.asked}\"")
-    print(f"          {watches.sentence(watch)}"
+    print(f"          {watches.sentence(watch, store)}"
           + (f"  (times on {watch.zone})" if watch.zone else ""))
     print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
           if full or watch.then else "          then: tells you what it saw")
@@ -750,7 +933,7 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
             print(f"          check: {watch.check['tool']} {json.dumps(watch.check['args'])}")
         print(f"          pick: {json.dumps(watch.pick) if watch.pick else 'all'}"
               f"   when: {json.dumps(watch.when)}   most a day: {watch.max_per_day}")
-        if watch.next_at and not watch.listen:
+        if watch.next_at and watch.check:
             print(f"          next look: {_short(watch.next_at)}")
         if watch.renew:
             print(f"          renew: {watch.renew['tool']} {json.dumps(watch.renew['args'])}"
@@ -761,6 +944,35 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
             print(f"          then may use: {', '.join(watch.allow_tools)}")
         print(f"          made {_short(watch.created_at)} (by {watch.created_via}), "
               f"for {watch.owner}")
+
+
+def _print_indriya(indriya: Indriya, store: Store, full: bool = False) -> None:
+    print(f"{indriya.id}  {indriya.state:<7} {indriyas.reading_line(indriya)}")
+    print(f"          {indriyas.sentence(indriya)}")
+    if indriya.owner != watches.LOCAL_OWNER:
+        print(f"          {indriya.owner}'s")
+    using = store.watches(sense=indriya.id)
+    if using:
+        print("          sensed by: " + ", ".join(f"{w.id} ({w.name})" for w in using))
+    if full:
+        print(f"          check: {indriya.check['tool']} "
+              f"{json.dumps(indriya.check['args'])}")
+        print(f"          pick: {json.dumps(indriya.pick) if indriya.pick else 'all'}"
+              f"   next reading: {_short(indriya.next_at)}")
+        if indriya.agent:
+            print(f"          agent: {indriya.agent}   runner: {indriya.runner}")
+        print(f"          made {_short(indriya.created_at)} (by {indriya.created_via}), "
+              f"for {indriya.owner}")
+
+
+def _print_reading(reading: Reading) -> None:
+    value = f"  {reading.value}" if reading.value else ""
+    print(f"{_short(reading.at)}  {reading.outcome:<9}{value}")
+    if reading.outcome != "read":
+        if reading.why:
+            print(f"    why: {reading.why}")
+        if reading.detail:
+            print(f"    {reading.detail}")
 
 
 def _print_look(look: Look, with_watch: bool, full: bool = False) -> None:

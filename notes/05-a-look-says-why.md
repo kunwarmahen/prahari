@@ -138,6 +138,10 @@ Fri 6 Nov 22:28  learned    53.8
 One turn of the agent for the evening's crossing, and none for the hours
 it stayed below 60: no model was asked by either watch.
 
+The two watches still made two calls to the weather service for one
+number. An indriya, a reading both of them sense, makes that one call
+([06 — one reading, many watches](06-one-reading-many-watches.md)).
+
 ## What was deliberately not built
 
 * **Keeping the whole answer.** 4,000 characters is enough to see why a

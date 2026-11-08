@@ -33,7 +33,7 @@ def make(store, **extra):
 
 class TestMadeWhole:
     def test_looks_or_listens_never_both(self, store):
-        with pytest.raises(WatchError, match="not both"):
+        with pytest.raises(WatchError, match="one of them"):
             make(store, listen="whatsapp")
         with pytest.raises(WatchError, match="needs a check"):
             make(store, check=None)

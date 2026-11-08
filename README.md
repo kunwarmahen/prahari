@@ -18,6 +18,11 @@ thing you were waiting for happens. Things that can tell you
 themselves, like a phone that just got a notification or a webhook,
 knock on Prahari's **inlet** instead, and the same recipe decides.
 
+A number several things want — the outside temperature, a price — can
+be an **indriya**: a reading Prahari keeps up to date with one call,
+which any number of watches *sense* and any agent reads, instead of each
+calling out on its own.
+
 ### Samay or Prahari?
 
 Both repeat things, so they're easy to mix up. The question to ask is
@@ -244,6 +249,54 @@ The watch is kept in `~/.prahari`, the same file the container reads,
 and the container's `prahari serve` looks at it from then on. Watches
 asked for in a chat need none of this: the agent makes them through
 Prahari itself.
+
+### One reading, many watches: indriyas
+
+The band above calls the weather service twice an hour for one number.
+An **indriya** (इन्द्रिय, *a sense*; said *in-dree-yuh*) is the looking
+half of a watch on its own: one call, a pick, how often. It keeps the
+value it took, with a time on it, and its recent history. Watches
+**sense** it instead of looking, and your agent answers "how cold is it
+outside?" from it, with no call at all
+([notes/06](notes/06-one-reading-many-watches.md)):
+
+```bash
+prahari indriya add outside-temp --check web_fetch \
+  --args '{"url": "https://api.open-meteo.com/v1/forecast?latitude=35.79&longitude=-78.78&current=temperature_2m,relative_humidity_2m&temperature_unit=fahrenheit"}' \
+  --pick json:current.temperature_2m --thing "the outside temperature" --every 15m
+#   added indriya outside-temp: reads the outside temperature every 15 minutes:
+#   looks at api.open-meteo.com/v1/forecast (with web_fetch)
+
+prahari add "Heat the guestroom" --sense outside-temp --when 'below 60' --then "…"
+prahari add "Cool the guestroom" --sense outside-temp --when 'above 70' --then "…"
+prahari add "Damp outside" --sense outside-temp \
+  --pick json:current.relative_humidity_2m --thing "the humidity" --when 'above 50'
+
+prahari indriya look outside-temp      # read once, now; each watch decides on it
+#   Sun 8 Nov 17:23  read       56.9
+#   29fa64b3  Sun 8 Nov 17:23  fired      56.9  then: told
+#   7f184479  Sun 8 Nov 17:23  learned    56.9
+#   63e8fd74  Sun 8 Nov 17:23  fired      57  then: told
+
+prahari indriya list                   # every reading, its value and age, who senses it
+prahari indriya get outside-temp --json
+prahari indriya readings outside-temp  # its history, newest first (the last 500)
+prahari indriya edit outside-temp --every 30m    # also --check/--args/--pick/--share
+prahari indriya pause outside-temp | resume outside-temp | rm outside-temp
+```
+
+One call out; three watches decided, and the humidity watch picked its
+own number from the same answer. A watch that senses has no `--check`,
+`--every` or `--wake` of its own: how often is the indriya's. When a
+reading fails, each watch that senses it says so on its own looks, but
+only the indriya counts it: three in a row pause the indriya, and you're
+told which watches went quiet with it. An indriya a watch still senses
+can't be removed.
+
+**Shared with the house, or not.** An indriya reads with your accounts.
+`--share house` lets everyone's watches and agents read its *value*. It
+never lets them call anything as you, or change it. It starts as
+`mine`.
 
 Every command takes `--json`.
 
@@ -504,6 +557,10 @@ banned for them.
 words, when it looks next and what it saw last, with **Look now**, an
 **every** box and **Save** to change how often it looks (30m, 3h, 1d;
 no less than 5 minutes), **Pause** / **Resume**, **Looks** (its history) and **Delete**.
+A watch that senses an indriya says which (*senses: outside-temp*) and has
+no **Look now** or **every** of its own; **Indriyas** lists each reading
+with its value, how old it is, which watches sense it, **Read now** and
+**Pause** / **Resume**.
 Every look opens on a click: why it was quiet, told you or failed, what
 went wrong, the check, the pick and what it picked out, what happened
 then, and what the check answered; a watch's **last:** line opens its
@@ -524,14 +581,18 @@ server.
 ```
 GET    /api/status                       is it watching; how many watches
 GET    /api/watches                      every watch, with its last look
-POST   /api/preview   {check|listen, pick, when, every, sample}   try it once
-POST   /api/watches   {name, check|listen, pick, when, every, then, ...}
+POST   /api/preview   {check|listen|sense, pick, when, every, sample}   try it once
+POST   /api/watches   {name, check|listen|sense, pick, when, every, then, ...}
 PATCH  /api/watches/ID   {check, pick, when, every, then, name, max_per_day}
 POST   /api/watches/ID/pause | /resume | /look     (look answers 202 at once)
 DELETE /api/watches/ID
 GET    /api/looks?watch=ID&limit=N       newest first
 GET    /api/inlet                        the inlet's addresses, key, words, people with keys
 GET    /api/mailboxes                    the mail folders kept open (no passwords)
+GET    /api/indriyas                     every indriya, with its value, age, who senses it
+GET    /api/indriyas/NAME                one, by name or id
+GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
+POST   /api/indriyas/NAME/look | /pause | /resume   (look answers 202 at once)
 POST   /inlet/WORD                       the inlet (an inlet key; also on --inlet-port alone)
 ```
 
@@ -558,9 +619,15 @@ is on it, and every day and time their watches say is said on it.
 | `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
+| `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again |
+| `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check |
+| `update_indriya`, `delete_indriya` | mend or remove one of this person's own (removing is refused while a watch senses it) |
 
-**The agent writes the recipe; you accept it.** The four reading tools
-say they only read, and the six that change something don't, so Yantra
+`create_watch` and `preview_watch` take `sense` (an indriya's name) in
+place of a check.
+
+**The agent writes the recipe; you accept it.** The six reading tools
+say they only read, and the nine that change something don't, so Yantra
 asks you before each one, on a card in words. `preview_watch` comes
 first and answers with the start of what the tool said, so a model whose
 pick found nothing sees why and writes a better one before you are asked
@@ -591,6 +658,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A watch has its days** | `starts`, `ends` and `stop` (a flight that landed): nothing is looked at before it starts, and one whose end came ends and says so, with no yes asked — it was agreed with the watch. Ended, it's kept 30 days, then removed; with no end at all, it asks once a month whether it's still wanted ([notes/04](notes/04-a-watch-has-its-days.md)) |
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
 | **A band is two watches** | one number watched from both sides — heat below 60, cool above 70 — is two watches on the same check, one line each, each with its own `then`. Each fires once as its line is crossed, with no model asked to decide; a second line the *same* way is still refused ([notes/05](notes/05-a-look-says-why.md)) |
+| **One reading, many watches** | an indriya reads once for every watch that senses it, and each watch is judged on the whole answer by the rules above, as if it had looked itself. A failed reading is said on each watch's looks and counted once, against the indriya; one a watch still senses is never removed ([notes/06](notes/06-one-reading-many-watches.md)) |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
 | **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |
@@ -627,6 +695,7 @@ offer watches to everyone.
 | `PRAHARI_DVARA_URL`, `PRAHARI_DVARA_TOKEN` | where Dvara is, and its `DVARA_TOKEN`: news is sent, and `--runner dvara` works (`add` asks Dvara for its agents, so it needs them too) |
 | `PRAHARI_DVARA_ACTOR` | who a watch made here is for |
 | `PRAHARI_MAX_WATCHES` | how many watches one person may have (default 30) |
+| `PRAHARI_MAX_INDRIYAS` | how many indriyas one person may have (default 30) |
 | `PRAHARI_TOKEN` | the page's token, instead of the one kept in the state folder |
 | `PRAHARI_INLET_TOKEN` | the inlet's key, instead of the one kept in the state folder |
 | `PRAHARI_PUBLIC_URL` | where a browser reaches the page when that isn't where it is bound (a container's port mapping) |
@@ -662,11 +731,16 @@ src/prahari/
 │                (below, contains, changed, new, any, ask), checked with
 │                the known keys named, and applied to a tool's answer
 ├── store.py     the SQLite file: watches (the promise), looks (the receipt),
-│                seen (keys already told), each person's inlet key, mailboxes
+│                seen (keys already told), each person's inlet key, mailboxes,
+│                indriyas and their readings
 ├── watches.py   make, mend, pause, find, a cap per person, one watch per
 │                call and pick; preview, which looks once with nothing
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
-├── clock.py     the rules above; the loop prahari serve runs; a watch's
+├── indriyas.py  shared readings: make, mend, find (own first, then the
+│                house's), never removed while sensed; their words and age
+│                ([notes/06](notes/06-one-reading-many-watches.md))
+├── clock.py     the rules above; the loop prahari serve runs; an indriya's
+│                readings, handed to each watch that senses it; a watch's
 │                days (it ends, asks, is removed); each look's why and
 │                what its check answered ([notes/05](notes/05-a-look-says-why.md)); the inlet's
 │                events; firing: a line that says what it is for, or a
@@ -700,13 +774,16 @@ deploy/
 
 ## Status
 
-The watch, its rules, the inlet, mailboxes kept open, Gmail's push, the
-inlet alone for the public road, the page and the agent's tools work,
-and are covered by 194 tests. The API is not stable.
+The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
+push, the inlet alone for the public road, the page and the agent's
+tools work, and are covered by 219 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
-answered by the house's model ([notes/05](notes/05-a-look-says-why.md)).
+answered by the house's model ([notes/05](notes/05-a-look-says-why.md));
+an indriya on the outside temperature read once for three watches, and
+read again through the page's API and `prahari mcp`
+([notes/06](notes/06-one-reading-many-watches.md)).
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a

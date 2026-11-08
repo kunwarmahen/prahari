@@ -95,5 +95,7 @@ def report(state: Path, store: Store) -> dict:
         "inlet_public": ((served.get("inlet_public") + "inlet/")
                          if served and served.get("inlet_public") else None),
         "mailboxes": len(store.mailboxes()),
+        "indriyas": {"active": len(store.indriyas(state="active")),
+                     "paused": len(store.indriyas(state="paused"))},
         "mcp": {"command": prahari_command(), "args": ["--state", str(state), "mcp"]},
     }

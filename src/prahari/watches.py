@@ -3,11 +3,12 @@ agent's tools all call, so the three cannot disagree about what a watch
 is allowed to be.
 
 A WATCH IS CHECKED WHOLE BEFORE ANYTHING IS SAVED. Its check names one
-tool and its arguments, or its listen names one word at the inlet --
-never both, never neither; its pick and its test are read by recipe.py,
-which refuses an unknown key by name; a watch that looks has an
-``every`` and one that listens has none. A mistake is said in words, so
-a model that proposed it can fix it.
+tool and its arguments, its listen names one word at the inlet, or its
+sense names an indriya (a shared reading, indriyas.py) -- exactly one of
+the three; its pick and its test are read by recipe.py, which refuses an
+unknown key by name; a watch that looks has an ``every``, and one that
+listens or senses has none (an indriya reads on its own every). A
+mistake is said in words, so a model that proposed it can fix it.
 
 ONE PERSON'S WATCHES ARE THAT PERSON'S. ``find`` with an ``owner``
 treats someone else's watch as no watch at all: the agent's tools are
@@ -122,19 +123,29 @@ def _call(raw, what: str) -> dict:
 
 def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=None,
             every: str = "", wake: str = "", renew=None, asked: str = "",
-            thing: str = "", starts=None, ends=None, stop=None, zone: str = "") -> dict:
-    """The recipe's parts, checked together; WatchError in words."""
+            thing: str = "", starts=None, ends=None, stop=None, zone: str = "",
+            sense=None) -> dict:
+    """The recipe's parts, checked together; WatchError in words. ``sense``:
+    the Indriya a sensing watch decides on (found by the caller)."""
     try:
         check = recipe._form(check, "check")
         listen = (listen or "").strip().lower()
-        if check and listen:
-            raise WatchError("a watch either looks (check) or listens (listen), not both")
-        if not check and not listen:
+        if sum(bool(x) for x in (check, listen, sense)) > 1:
+            raise WatchError("a watch either looks (check), listens (listen) or senses an "
+                             "indriya (sense) -- one of them")
+        if not check and not listen and not sense:
             raise WatchError("a watch needs a check -- {\"tool\": NAME, \"args\": {...}} "
-                             "-- or a listen word for the inlet")
+                             "-- a listen word for the inlet, or an indriya to sense")
         wake = (wake or "").strip().lower()
         renew = _call(renew, "renew")
-        if check:
+        if sense:
+            if every:
+                raise WatchError(f"a watch that senses an indriya has no every: "
+                                 f"{sense.name} reads every {sense.every} for all of them "
+                                 f"(prahari indriya edit {sense.name} --every ...)")
+            if wake or renew:
+                raise WatchError("wake and renew are for a watch that looks itself")
+        elif check:
             check = _call(check, "check")
             recipe.every(every)
             if wake and not _WORD.match(wake):
@@ -176,7 +187,9 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
         # The person knows a watch by what it looks at and when it tells
         # them, not by the tool it looks with.
         name = (f"{recipe.where_words(check)}: {recipe.thing_words(pick, thing)} "
-                f"{recipe.when_words(when)}" if check else f"{listen} at the inlet")
+                f"{recipe.when_words(when)}" if check else
+                f"{sense.name}: {recipe.thing_words(pick, thing or sense.thing)} "
+                f"{recipe.when_words(when)}" if sense else f"{listen} at the inlet")
         name = name if len(name) <= 80 else name[:79] + "…"
     place(zone)
     starts, ends = moment(starts, "starts", zone), moment(ends, "ends", zone)
@@ -185,7 +198,8 @@ def checked(*, name: str = "", check=None, listen: str = "", pick=None, when=Non
     return {"name": name, "asked": asked, "thing": thing, "starts": starts, "ends": ends,
             "stop": stop, "zone": (zone or "").strip(),
             "check": check, "listen": listen, "pick": pick, "when": when,
-            "every": every.strip() if check else "", "wake": wake, "renew": renew}
+            "every": every.strip() if check else "", "wake": wake, "renew": renew,
+            "sense": sense.id if sense else ""}
 
 
 def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=None,
@@ -195,17 +209,24 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
-           dvara=None) -> Watch:
+           dvara=None, sense: str = "", home: set[str] | None = None) -> Watch:
+    sensed = None
+    if sense:
+        from prahari import indriyas
+        sensed = indriyas.find(store, sense, owner, home)
+        if pick is None or pick == {}:
+            pick = sensed.pick            # what it reads, unless told otherwise
+        thing = thing or sensed.thing
     parts = checked(name=name, check=check, listen=listen, pick=pick, when=when,
                     every=every, wake=wake, renew=renew, asked=asked, thing=thing,
-                    starts=starts, ends=ends, stop=stop, zone=zone)
+                    starts=starts, ends=ends, stop=stop, zone=zone, sense=sensed)
     if parts["ends"] and from_iso(parts["ends"]) <= now_utc():
         raise WatchError(f"ends ({shown_at(parts['ends'], zone)}) has already passed")
     twin = same_as(store, owner, parts)
     if twin is not None:
         raise WatchError(
             f"{owner} already has a watch on exactly this: {twin.id} ({twin.name}) -- "
-            f"{sentence(twin)}. Mend that one (its test, how often) instead of making "
+            f"{sentence(twin, store)}. Mend that one (its test, how often) instead of making "
             "a second; ask the person first")
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
@@ -237,6 +258,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
     if parts["listen"]:
         # An event is news by being sent: there is nothing to learn first.
         watch.looked = True
+    elif parts["sense"]:
+        pass       # it decides on the indriya's next reading; that one learns
     else:
         # the first look, soon (it learns) -- or when it starts
         watch.next_at = parts["starts"] or iso(now_utc())
@@ -284,7 +307,11 @@ def same_as(store: Store, owner: str, parts: dict) -> Watch | None:
             if watch.listen == parts["listen"] and watch.pick == parts["pick"] \
                     and watch.when == parts["when"]:
                 return watch
-        elif watch.check == parts["check"] and watch.pick == parts["pick"] \
+        elif parts.get("sense"):
+            if watch.sense == parts["sense"] and watch.pick == parts["pick"] \
+                    and not _other_side(watch.when, parts["when"]):
+                return watch
+        elif watch.check and watch.check == parts["check"] and watch.pick == parts["pick"] \
                 and not _other_side(watch.when, parts["when"]):
             return watch
     return None
@@ -324,12 +351,25 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
+    sensed = None
+    if watch.sense:
+        sensed = store.get_indriya(watch.sense)
+        if sensed is None:
+            raise WatchError(f"the indriya {watch.id} sensed is gone; remove the watch")
+        moved = [k for k in ("check", "every", "wake", "renew") if given.get(k)]
+        if moved:
+            raise WatchError(f"{watch.id} senses {sensed.name}, so it has no "
+                             f"{' or '.join(moved)} of its own: mend the indriya "
+                             f"(prahari indriya edit {sensed.name} ...)")
+        given = {k: v for k, v in given.items() if k not in ("check", "every", "wake",
+                                                               "renew")}
     recipe_keys = {"check", "pick", "when"} | ({"every"} if {"check", "pick", "when"}
                                                 & set(given) else set())
+    looks_itself = not watch.listen and not watch.sense
     parts = checked(
         name=given.get("name", watch.name),
-        check=given.get("check", watch.check) if not watch.listen else None,
-        listen=watch.listen, pick=given.get("pick", watch.pick),
+        check=given.get("check", watch.check) if looks_itself else None,
+        listen=watch.listen, sense=sensed, pick=given.get("pick", watch.pick),
         when=given.get("when", watch.when), every=given.get("every", watch.every),
         wake=given.get("wake", watch.wake), renew=given.get("renew", watch.renew),
         asked=given.get("asked", watch.asked), thing=given.get("thing", watch.thing),
@@ -347,7 +387,7 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     if watch.state == "ended" and {"keep", "ends", "starts"} & set(given):
         fields.update(state="active", ended_at=None, paused_because="",
                       kept_at=iso(now_utc()), still_asked_at=None)
-        if not watch.listen:
+        if looks_itself:
             fields["next_at"] = iso(now_utc())
     if "renew" in given:
         fields["renew_at"] = iso(now_utc()) if parts["renew"] else None
@@ -355,11 +395,11 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         fields.update(check=parts["check"], pick=parts["pick"], when=parts["when"],
                       every=parts["every"], armed=True, last_value="", trouble=0,
                       looked=bool(watch.listen))
-        if not watch.listen:
+        if looks_itself:
             fields["next_at"] = iso(now_utc())
         if watch.state == "paused" and watch.paused_because.startswith(("broken", "failed")):
             fields.update(state="active", paused_because="")
-    if "every" in given and not recipe_keys & set(given) and not watch.listen:
+    if "every" in given and not recipe_keys & set(given) and looks_itself:
         fields["every"] = parts["every"]
         soon = now_utc() + recipe.every(parts["every"])
         due = from_iso(watch.next_at)
@@ -375,7 +415,7 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         if not 1 <= int(given["max_per_day"]) <= 200:
             raise WatchError("max_per_day is between 1 and 200")
         fields["max_per_day"] = int(given["max_per_day"])
-    if "starts" in given and not watch.listen and fields.get("state", watch.state) == "active":
+    if "starts" in given and looks_itself and fields.get("state", watch.state) == "active":
         fields.setdefault("next_at", iso(now_utc()))
     start = from_iso(parts["starts"])
     if start is not None and start > now_utc() and "next_at" in fields:
@@ -398,7 +438,7 @@ def resume(store: Store, watch_id: str, owner: str | None = None) -> Watch:
     if watch.state == "ended":
         return update(store, watch.id, owner=owner, keep=True)
     store.update(watch.id, state="active", paused_because="", trouble=0,
-                 next_at=None if watch.listen else iso(now_utc()))
+                 next_at=None if watch.listen or watch.sense else iso(now_utc()))
     return store.get(watch.id)
 
 
@@ -432,10 +472,25 @@ def find(store: Store, watch_id: str, owner: str | None = None) -> Watch:
     return found[0]
 
 
-def sentence(watch: Watch) -> str:
-    said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when, watch.every,
-                           watch.thing)
+def sentence(watch: Watch, store: Store | None = None) -> str:
+    if watch.sense:
+        said = sense_words(watch, store)
+    else:
+        said = recipe.sentence(watch.check, watch.listen, watch.pick, watch.when,
+                               watch.every, watch.thing)
     return said + push_words(watch.wake, watch.renew) + span_words(watch)
+
+
+def sense_words(watch: Watch, store: Store | None = None) -> str:
+    """A sensing watch in words: which reading, and when it tells."""
+    sensed = store.get_indriya(watch.sense) if store is not None else None
+    which = (f"{sensed.name} (every {recipe.duration_words(recipe.every(sensed.every))})"
+             if sensed is not None else f"indriya {watch.sense}")
+    edge = " (once each time it becomes true)" if recipe.test_of(watch.when) in \
+        recipe.EDGED else ""
+    return (f"senses {which}; tells you when "
+            f"{recipe.thing_words(watch.pick, watch.thing)} "
+            f"{recipe.when_words(watch.when)}{edge}")
 
 
 def push_words(wake: str, renew: dict | None) -> str:
@@ -452,7 +507,7 @@ def card(watch: Watch, store: Store | None = None) -> dict:
     """A watch as a page or a program reads it: itself, in words, and its
     last look."""
     data = watch.as_dict()
-    data["sentence"] = sentence(watch)
+    data["sentence"] = sentence(watch, store)
     data["does"] = (f"Then it asks the agent: {watch.then}" if watch.then
                     else "You get a line saying what it saw; no model is asked")
     if store is not None:
@@ -471,7 +526,7 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
             every: str = "", sample=None, agent: str = "", runner: str = "direct",
             owner: str = LOCAL_OWNER, wake: str = "", renew=None, thing: str = "",
             starts=None, ends=None, stop=None, store: Store | None = None,
-            zone: str = "") -> dict:
+            zone: str = "", sense: str = "", home: set[str] | None = None) -> dict:
     """Try a recipe ONCE, before anybody said yes: look (only with a tool
     that reads -- nothing is granted yet), pick, and say what it saw.
 
@@ -482,24 +537,33 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
     the one the sender will send."""
     import json as _json
 
+    sensed = None
+    if sense:
+        from prahari import indriyas
+        if store is None:
+            raise WatchError("a watch on an indriya is tried with Prahari's store")
+        sensed = indriyas.find(store, sense, owner, home)
+        if pick is None or pick == {}:
+            pick = sensed.pick
+        thing = thing or sensed.thing
     parts = checked(check=check, listen=listen, pick=pick, when=when, every=every,
                     wake=wake, renew=renew, thing=thing, starts=starts, ends=ends, stop=stop,
-                    zone=zone)
+                    zone=zone, sense=sensed)
     span = Watch(id="", owner=owner, name="", pick=parts["pick"], thing=parts["thing"],
                  starts=parts["starts"], ends=parts["ends"], stop=parts["stop"],
-                 zone=parts["zone"])
-    out: dict = {"sentence": recipe.sentence(parts["check"], parts["listen"],
-                                             parts["pick"], parts["when"], parts["every"],
-                                             parts["thing"])
-                 + push_words(parts["wake"], parts["renew"]) + span_words(span),
-                 "looked": False}
+                 zone=parts["zone"], when=parts["when"], sense=parts["sense"])
+    said = (sense_words(span, store) if sensed is not None else
+            recipe.sentence(parts["check"], parts["listen"], parts["pick"], parts["when"],
+                            parts["every"], parts["thing"]))
+    out: dict = {"sentence": said + push_words(parts["wake"], parts["renew"])
+                 + span_words(span), "looked": False}
     twin = same_as(store, owner, parts) if store is not None else None
     if twin is not None:
         # Said before anything is looked at: the person is asked about the
         # watch they have, not a second one.
         out["twin"] = twin.id
         out["said"] = (f"{owner} already has a watch on exactly this: {twin.id} "
-                       f"({twin.name}) -- {sentence(twin)}. Offer to mend that one "
+                       f"({twin.name}) -- {sentence(twin, store)}. Offer to mend that one "
                        "instead of making a second.")
         return out
     if parts["listen"]:
@@ -510,13 +574,21 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
         text = _json.dumps(sample if isinstance(sample, dict) else {"text": str(sample)},
                            sort_keys=True, ensure_ascii=False)
     else:
-        probe = Watch(id="", owner=owner, name="", check=parts["check"], agent=agent,
-                      runner=runner)
+        if sensed is not None:
+            # the indriya's own call, on its own road: what the watch will
+            # be handed at each reading
+            from prahari.indriyas import probe as indriya_probe
+            probe = indriya_probe(sensed)
+            probe.id = ""
+        else:
+            probe = Watch(id="", owner=owner, name="", check=parts["check"], agent=agent,
+                          runner=runner)
         called = caller.call(probe, granted=False)
         if not called.ok:
+            tool = (sensed.check if sensed is not None else parts["check"])["tool"]
             out["said"] = (f"The look didn't work: {called.detail}"
                            if "not read-only" not in called.detail else
-                           f"{parts['check']['tool']} isn't a tool that only reads, so it "
+                           f"{tool} isn't a tool that only reads, so it "
                            "can't be tried before the person accepts it; every look will "
                            "run exactly this call once they do.")
             out["result"] = ""

@@ -173,6 +173,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       <label>Look with (a tool that reads) <input name="tool" placeholder="web_fetch"></label>
       <label>…or listen at the inlet for <input name="listen" placeholder="whatsapp"></label>
     </div>
+    <label>…or decide on an indriya's readings (no tool, no every of its own) <input name="sense" placeholder="outside-temp"></label>
     <label>The tool's arguments (JSON) <input name="args" class="mono"
       placeholder='{"url": "https://example.com/item"}'></label>
     <div class="two">
@@ -192,6 +193,9 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       <button class="btn link" type="button" id="new-close">Cancel</button></div>
   </form>
   <div id="watches"><p class="empty">Loading…</p></div>
+
+  <div class="bar"><h2>Indriyas</h2><span class="empty">readings kept up to date, shared by watches and agents</span></div>
+  <div id="indriyas"><p class="empty">Loading…</p></div>
 
   <div class="bar"><h2>The inlet</h2></div>
   <div class="inlet" id="inlet">…</div>
@@ -247,6 +251,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     $("state-line").innerHTML = `<span class="dot ${on ? "on" : ""}"></span>` +
       (on ? "<b>Watching</b>" : "<b>Not running</b> (prahari serve)") +
       ` · ${s.watches.active} active, ${s.watches.paused} paused` +
+      (s.indriyas && s.indriyas.active ? ` · ${s.indriyas.active} indriya(s)` : "") +
       `<br>News goes to ${s.dvara ? "your chat, through Dvara" : "nobody yet (no Dvara set)"}`;
   }
 
@@ -262,10 +267,12 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     }
     box.innerHTML = watches.map((w) => {
       const last = w.last_look;
+      const self = !w.listen && !w.sense;     // it looks itself: Look now, every
       return `<div class="watch" data-id="${esc(w.id)}">
         <div class="top"><span class="name">${esc(w.name)}</span>
           ${w.listen ? `<span class="tag listen">listens: ${esc(w.listen)}</span>` : ""}
           ${w.wake ? `<span class="tag listen">woken by: ${esc(w.wake)}</span>` : ""}
+          ${w.sense ? `<span class="tag listen">senses: ${esc(senseNames[w.sense] || w.sense)}</span>` : ""}
           ${w.owner !== "local" ? `<span class="tag">for ${esc(w.owner)}</span>` : ""}
           ${w.state === "paused" ? `<span class="tag paused">paused</span>` : ""}
           ${w.state === "ended" ? `<span class="tag paused">ended</span>` : ""}
@@ -273,11 +280,11 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
         ${w.asked ? `<div class="asked">You asked: “${esc(w.asked)}”</div>` : ""}
         <div class="says">${esc(w.sentence)}. ${esc(w.does)}.</div>
         ${w.paused_because ? `<div class="paused-why">${esc(w.paused_because)}</div>` : ""}
-        <div class="last ${last ? "open-last" : ""}" ${last ? 'data-act="last" title="Why? Open this look"' : ""}>${last ? `last: <span class="out ${esc(last.outcome)}">${esc(words[last.outcome] || last.outcome)}</span> ${when(last.started_at)} ${esc(last.value)}` : (w.listen ? "nothing heard yet" : "not looked yet")}
-          ${w.next_at && !w.listen && w.state === "active" ? ` · next look ${when(w.next_at)}` : ""}</div>
+        <div class="last ${last ? "open-last" : ""}" ${last ? 'data-act="last" title="Why? Open this look"' : ""}>${last ? `last: <span class="out ${esc(last.outcome)}">${esc(words[last.outcome] || last.outcome)}</span> ${when(last.started_at)} ${esc(last.value)}` : (w.listen ? "nothing heard yet" : w.sense ? "waiting for its next reading" : "not looked yet")}
+          ${w.next_at && self && w.state === "active" ? ` · next look ${when(w.next_at)}` : ""}</div>
         <div class="acts">
-          ${w.listen ? "" : `<button class="btn link" data-act="look">Look now</button>`}
-          ${w.listen ? "" : `<span class="every">every <input class="every-box" value="${esc(w.every)}"
+          ${self ? `<button class="btn link" data-act="look">Look now</button>` : ""}
+          ${!self ? "" : `<span class="every">every <input class="every-box" value="${esc(w.every)}"
             aria-label="how often it looks, like 30m, 3h or 1d" size="5">
             <button class="btn link" data-act="every">Save</button></span>`}
           <button class="btn link" data-act="${w.state === "paused" ? "resume" : "pause"}">${w.state === "paused" ? "Resume" : "Pause"}</button>
@@ -306,6 +313,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   // Everything kept about one look, so the person can see for themselves
   // why it was quiet, told them, or failed.
   const cameBy = { clock: "its own clock", now: "you asked (Look now)", inlet: "a knock on the inlet",
+                   indriya: "a reading of its indriya",
                    wake: "woken by a knock", renew: "keeping its push alive" };
   const turnWords = { ok: "the agent did it", failed: "the agent's turn failed",
     refused: "the agent was refused a tool", held: "held for your yes",
@@ -322,7 +330,8 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
                                             ? "What went wrong" : "Note", esc(l.detail));
     row("Came by", esc(cameBy[l.came_by] || l.came_by));
     row("When", `${when(l.started_at)}${l.ended_at ? ` · took ${took(l.started_at, l.ended_at)}` : ""}`);
-    if (w.check) row("Looked with", `<code>${esc(w.check.tool)}</code> <code>${esc(JSON.stringify(w.check.args || {}))}</code>`);
+    if (w.check && w.check.tool) row("Looked with", `<code>${esc(w.check.tool)}</code> <code>${esc(JSON.stringify(w.check.args || {}))}</code>`);
+    if (w.sense) row("Read by", `the indriya <code>${esc(senseNames[w.sense] || w.sense)}</code>`);
     if (w.pick) row("Picked out", `<code>${esc(JSON.stringify(w.pick))}</code> → ${esc(l.value || "nothing")}`);
     if (w.when) row("Tells you when", `<code>${esc(JSON.stringify(w.when))}</code>`);
     if (l.turn) row("Then", esc(turnWords[l.turn] || l.turn) + (l.notified ? " · a message was sent" : " · no message sent"));
@@ -333,6 +342,40 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       ${l.said ? `<details><summary>What the check answered</summary><pre>${esc(l.said)}</pre></details>` : ""}
       ${l.reply ? `<details><summary>What the agent said</summary><pre>${esc(l.reply)}</pre></details>` : ""}`;
   }
+
+  let senseNames = {};
+  async function senses() {
+    const { indriyas } = await api("GET", "indriyas");
+    senseNames = Object.fromEntries(indriyas.map((i) => [i.id, i.name]));
+    $("indriyas").innerHTML = indriyas.length ? indriyas.map((i) => `
+      <div class="watch" data-indriya="${esc(i.name)}">
+        <div class="top"><span class="name">${esc(i.name)}</span>
+          <span class="tag">${i.read_at ? esc(i.value) : "not read yet"}</span>
+          ${i.share === "house" ? `<span class="tag">shared with the house</span>` : ""}
+          ${i.owner !== "local" ? `<span class="tag">${esc(i.owner)}'s</span>` : ""}
+          ${i.state === "paused" ? `<span class="tag paused">paused</span>` : ""}</div>
+        <div class="says">${esc(i.sentence)}.</div>
+        ${i.paused_because ? `<div class="paused-why">${esc(i.paused_because)}</div>` : ""}
+        <div class="last">${i.read_at ? `read ${esc(i.age)}` : "not read yet"}${i.state === "active" && i.next_at ? ` · next ${when(i.next_at)}` : ""}
+          ${i.last_reading && i.last_reading.outcome !== "read" ? ` · last: <span class="out ${esc(i.last_reading.outcome)}">${esc(words[i.last_reading.outcome] || i.last_reading.outcome)}</span> ${esc(i.last_reading.why)}` : ""}</div>
+        <div class="last">${i.sensed_by.length ? "sensed by " + i.sensed_by.map((w) => esc(w.name)).join(", ") : "no watch senses it yet"}</div>
+        <div class="acts"><button class="btn link" data-act="look">Read now</button>
+          <button class="btn link" data-act="${i.state === "paused" ? "resume" : "pause"}">${i.state === "paused" ? "Resume" : "Pause"}</button></div>
+      </div>`).join("")
+      : `<p class="hint">An indriya reads one number (or line) for everyone: the outside
+        temperature, a price. Watches <i>sense</i> it instead of each calling out, and your
+        agent answers from it. Ask your agent to keep one, or:
+        <code>prahari indriya add outside-temp --check TOOL --args JSON --pick number --every 15m</code>.</p>`;
+  }
+  $("indriyas").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]"); if (!btn) return;
+    const name = btn.closest("[data-indriya]").dataset.indriya;
+    try {
+      await api("POST", `indriyas/${encodeURIComponent(name)}/${btn.dataset.act}`);
+      if (btn.dataset.act === "look") btn.textContent = "Reading…";
+      setTimeout(() => refresh().catch(() => {}), btn.dataset.act === "look" ? 3000 : 0);
+    } catch (err) { fail(err); }
+  });
 
   async function inlet() {
     const s = await api("GET", "inlet");
@@ -406,10 +449,11 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   function recipe() {
     const f = form.elements, out = {};
     if (f.listen.value.trim()) out.listen = f.listen.value.trim();
+    else if (f.sense.value.trim()) out.sense = f.sense.value.trim();
     else out.check = { tool: f.tool.value.trim(), args: f.args.value.trim() ? JSON.parse(f.args.value) : {} };
     out.pick = pickOf(f.pick.value); out.when = whenOf(f.when.value);
-    if (!out.listen) out.every = f.every.value.trim() || "1h";
-    if (!out.listen && f.wake.value.trim()) out.wake = f.wake.value.trim();
+    if (out.check) out.every = f.every.value.trim() || "1h";
+    if (out.check && f.wake.value.trim()) out.wake = f.wake.value.trim();
     return out;
   }
   function pickOf(text) {
@@ -452,6 +496,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
 
   async function refresh() {
     $("error").classList.add("hidden");
+    await senses();          // names first: watches show which reading they sense
     await Promise.all([status(), list()]);
     await looks();
   }

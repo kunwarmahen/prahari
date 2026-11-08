@@ -15,7 +15,12 @@ tables:
   one person's phone says reaches only that person's watches;
 * ``mailbox`` -- the mail folders Prahari keeps open (mailbox.py), and
   where each one got to. Each names a Setu mail account; the password is
-  in Setu, never here.
+  in Setu, never here;
+* ``indriya`` -- a shared reading (indriyas.py): one call, a pick, how
+  often, and the value it last took, with a time on it. Watches that
+  ``sense`` it decide on what it read instead of each calling out;
+* ``reading`` -- an indriya's history: one row per reading, the newest
+  ``READINGS_KEPT`` of them.
 
 A LOOK THAT FOUND NOTHING IS A ROW TOO (``quiet``). "Is it still
 watching?" deserves an answer with a time on it, not an absence.
@@ -58,6 +63,17 @@ STATES = ("active", "paused", "ended")
 REPLY_CAP = 20_000
 #: Keys a watch remembers; the oldest go first past this.
 SEEN_CAP = 5000
+
+#: How a reading ended.
+#:   read      the call answered and the pick took a value
+#:   broken    the call answered, and the pick found nothing in it
+#:   failed    the call itself failed (or the site turned it away)
+#:   needs_person  a sign-in wall or a yes: paused until the person is back
+#:   busy      what the call needs was in use elsewhere; skipped
+READING_OUTCOMES = ("read", "broken", "failed", "needs_person", "busy")
+INDRIYA_SHARES = ("mine", "house")
+#: Readings an indriya keeps; the oldest go first past this.
+READINGS_KEPT = 500
 
 
 def now_utc() -> datetime:
@@ -141,6 +157,57 @@ class Watch:
     #: The person's own time zone ("Europe/London"), its days and times
     #: said on their clock; "" for this computer's.
     zone: str = ""
+    #: The indriya this watch senses (its id): it has no check of its own,
+    #: and decides on each of the indriya's readings. "" for none.
+    sense: str = ""
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Indriya:
+    """A shared reading: the looking half of a watch, on its own."""
+    id: str
+    owner: str
+    #: One short word a person and an agent call it by ("outside-temp").
+    name: str
+    #: What it reads, in a few words ("the outside temperature").
+    thing: str = ""
+    check: dict = field(default_factory=dict)
+    pick: dict = field(default_factory=dict)
+    every: str = "15m"
+    runner: str = "direct"
+    agent: str = ""
+    #: "mine": only its owner's watches and agents see it; "house": anyone's.
+    share: str = "mine"
+    state: str = "active"
+    paused_because: str = ""
+    created_at: str = ""
+    created_via: str = "cli"
+    next_at: str | None = None
+    trouble: int = 0
+    #: The last value it took, in words, and as stored (JSON), and when.
+    value: str = ""
+    stored: str = ""
+    read_at: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Reading:
+    id: str
+    indriya: str
+    at: str
+    outcome: str = "read"
+    value: str = ""
+    stored: str = ""
+    why: str = ""
+    detail: str = ""
+    #: The start of what the call answered.
+    said: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -216,8 +283,42 @@ CREATE TABLE IF NOT EXISTS watch (
     ended_at TEXT,
     kept_at TEXT,
     still_asked_at TEXT,
-    zone TEXT NOT NULL DEFAULT ''
+    zone TEXT NOT NULL DEFAULT '',
+    sense TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS indriya (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    thing TEXT NOT NULL,
+    "check" TEXT NOT NULL,
+    pick TEXT NOT NULL,
+    every TEXT NOT NULL,
+    runner TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    share TEXT NOT NULL,
+    state TEXT NOT NULL,
+    paused_because TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_via TEXT NOT NULL,
+    next_at TEXT,
+    trouble INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    stored TEXT NOT NULL,
+    read_at TEXT
+);
+CREATE TABLE IF NOT EXISTS reading (
+    id TEXT PRIMARY KEY,
+    indriya TEXT NOT NULL,
+    at TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    value TEXT NOT NULL,
+    stored TEXT NOT NULL,
+    why TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    said TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reading_by_indriya ON reading (indriya, at);
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
     watch TEXT NOT NULL,
@@ -274,7 +375,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("starts", "TEXT"), ("ends", "TEXT"),
                     ("stop", "TEXT NOT NULL DEFAULT '{}'"), ("ended_at", "TEXT"),
                     ("kept_at", "TEXT"), ("still_asked_at", "TEXT"),
-                    ("zone", "TEXT NOT NULL DEFAULT ''")),
+                    ("zone", "TEXT NOT NULL DEFAULT ''"),
+                    ("sense", "TEXT NOT NULL DEFAULT ''")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
@@ -323,10 +425,11 @@ class Store:
         return _load(Watch, row) if row else None
 
     def watches(self, owner: str | None = None, state: str | None = None,
-                listen: str | None = None, wake: str | None = None) -> list[Watch]:
+                listen: str | None = None, wake: str | None = None,
+                sense: str | None = None) -> list[Watch]:
         query, where, args = "SELECT * FROM watch", [], []
         for column, value in (("owner", owner), ("state", state), ("listen", listen),
-                              ("wake", wake)):
+                              ("wake", wake), ("sense", sense)):
             if value is not None:
                 where.append(f"{column} = ?")
                 args.append(value)
@@ -460,6 +563,67 @@ class Store:
         with self._db() as db:
             db.execute("DELETE FROM inlet_key WHERE owner = ?", (owner,))
         return self.inlet_key(owner)
+
+    # -- indriyas ------------------------------------------------------------
+
+    def add_indriya(self, indriya: Indriya) -> Indriya:
+        if not indriya.id:
+            indriya.id = self._new_id("indriya")
+        if not indriya.created_at:
+            indriya.created_at = iso(now_utc())
+        self._put("indriya", indriya)
+        return indriya
+
+    def get_indriya(self, indriya_id: str) -> Indriya | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM indriya WHERE id = ?",
+                             (indriya_id,)).fetchone()
+        return _load(Indriya, row) if row else None
+
+    def indriyas(self, owner: str | None = None, state: str | None = None) -> list[Indriya]:
+        query, where, args = "SELECT * FROM indriya", [], []
+        for column, value in (("owner", owner), ("state", state)):
+            if value is not None:
+                where.append(f"{column} = ?")
+                args.append(value)
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        with self._db() as db:
+            rows = db.execute(query + " ORDER BY created_at", args).fetchall()
+        return [_load(Indriya, r) for r in rows]
+
+    def update_indriya(self, indriya_id: str, **changes) -> None:
+        if not changes:
+            return
+        cols = ", ".join(f'"{k}" = ?' for k in changes)
+        with self._db() as db:
+            db.execute(f"UPDATE indriya SET {cols} WHERE id = ?",
+                       [*(_dump(k, v) for k, v in changes.items()), indriya_id])
+
+    def delete_indriya(self, indriya_id: str) -> bool:
+        """Forget an indriya and its readings."""
+        with self._db() as db:
+            gone = db.execute("DELETE FROM indriya WHERE id = ?", (indriya_id,)).rowcount
+            db.execute("DELETE FROM reading WHERE indriya = ?", (indriya_id,))
+        return bool(gone)
+
+    def add_reading(self, reading: Reading) -> Reading:
+        if not reading.id:
+            reading.id = self._new_id("reading")
+        self._put("reading", reading)
+        with self._db() as db:
+            db.execute(
+                "DELETE FROM reading WHERE indriya = ? AND id NOT IN (SELECT id FROM "
+                "reading WHERE indriya = ? ORDER BY at DESC, rowid DESC LIMIT ?)",
+                (reading.indriya, reading.indriya, READINGS_KEPT))
+        return reading
+
+    def readings(self, indriya_id: str, limit: int = 50) -> list[Reading]:
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM reading WHERE indriya = ? "
+                              "ORDER BY at DESC, rowid DESC LIMIT ?",
+                              (indriya_id, limit)).fetchall()
+        return [_load(Reading, r) for r in rows]
 
     # -- mailboxes -----------------------------------------------------------
 
