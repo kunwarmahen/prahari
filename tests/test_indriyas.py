@@ -10,6 +10,14 @@ tell its owner which watches went quiet with it. An indriya in use is not
 removed out from under its watches. And sharing is the owner's choice: a
 person's readings are theirs until they mark them for the house, and even
 then nobody else may change them.
+
+And ONE CALL STAYS ONE CALL, BY ITSELF, BUT NEVER BEHIND ANYONE'S BACK.
+A new watch on a call an indriya already makes senses it, and says so; a
+faster watch speeds up the person's own indriya, never someone else's.
+Watches made before it move only on the person's word, and keep what
+they remembered when the answer is the same. A reader asking for fresh
+can't make a call more than once in five minutes, and a fresh read fires
+nothing. A reading nothing has used in a month pauses and says so.
 """
 
 from __future__ import annotations
@@ -384,4 +392,252 @@ class TestTheOtherDoors:
         outside(store)
         heat, _ = band(store)
         assert watches.card(store.get(heat.id), store)["sense_name"] == "outside-temp"
+        clock.close()
+
+
+
+def hour_watch(store, name="Heat the guestroom", when=None, every="1h", **extra):
+    """A watch that looks itself at the weather call, as the guestroom's did."""
+    return watches.create(store, name=name, check=WEATHER, pick={"json": "temperature"},
+                          when=when or {"below": 60}, every=every, **extra)
+
+
+class TestOneCallByItself:
+    def test_a_new_watch_on_the_same_call_senses_the_reading_and_says_so(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        indriya = outside(store)
+        notes: list[str] = []
+        watch = hour_watch(store, every="30m", notes=notes)
+        assert watch.sense == indriya.id and not watch.check and watch.next_at is None
+        assert notes == ["It goes by the reading outside-temp, which already makes "
+                         "this call, instead of calling again"]
+        assert store.get_indriya(indriya.id).every == "15m"     # already fresher
+        clock.close()
+
+    def test_a_faster_watch_speeds_up_the_persons_own_reading(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        indriya = outside(store)
+        notes: list[str] = []
+        hour_watch(store, every="5m", notes=notes)
+        assert store.get_indriya(indriya.id).every == "5m"
+        assert "outside-temp now reads every 5 minutes (it read every 15 minutes)" in notes[1]
+        clock.close()
+
+    def test_someone_elses_house_reading_is_used_only_when_fresh_enough(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        indriya = outside(store, share="house", owner="asha")
+        slow: list[str] = []
+        mine = hour_watch(store, every="5m", notes=slow)
+        assert mine.check and not mine.sense                     # looks itself
+        assert "less often than asked" in slow[0]
+        assert store.get_indriya(indriya.id).every == "15m"      # asha's, untouched
+        fine: list[str] = []
+        other = hour_watch(store, name="Cool it", when={"above": 70}, notes=fine)
+        assert other.sense == indriya.id and "(asha's, shared with the house)" in fine[0]
+        clock.close()
+
+    def test_a_private_or_paused_reading_is_not_taken(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        outside(store, owner="asha")                             # asha's own
+        assert hour_watch(store).check
+        mine = outside(store)
+        indriyas.pause(store, mine)
+        notes: list[str] = []
+        watch = hour_watch(store, name="Cool it", when={"above": 70}, notes=notes)
+        assert watch.check and "is paused, so this watch looks itself" in notes[0]
+        clock.close()
+
+    def test_look_itself_makes_its_own_call(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        outside(store)
+        watch = hour_watch(store, look_itself=True)
+        assert watch.check == WEATHER and not watch.sense
+        clock.close()
+
+    def test_a_preview_says_it_would_go_by_the_reading(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        outside(store)
+        said = watches.preview(FakeCaller(ANSWER), check=WEATHER,
+                               pick={"json": "temperature"}, when={"below": 60},
+                               every="5m", store=store)
+        assert said["reader"].startswith("It goes by the reading outside-temp")
+        assert "would then read every 5 minutes" in said["reader"]
+        assert store.get_indriya(store.indriyas()[0].id).every == "15m"   # dry
+        clock.close()
+
+
+class TestMovingWatchesOnto:
+    def test_the_band_moved_keeps_what_it_remembered(self, tmp_path):
+        """The guestroom pair, made before any indriya, moved onto one: the
+        same call and pick, so the heat watch stays fired-and-waiting
+        instead of telling the person 56 again."""
+        caller, notes = FakeCaller(ANSWER), FakeNotifier()
+        store, clock = make_clock(tmp_path, caller, notifier=notes)
+        heat = hour_watch(store)
+        cool = hour_watch(store, name="Cool the guestroom", when={"above": 70})
+        clock.look_now(heat.id)
+        clock.look_now(cool.id)
+        assert [w for w, _ in notes.sent] == [heat.id]           # 56 is below 60
+        made, moved, could = indriyas.from_watch(store, store.get(heat.id),
+                                                 name="outside-temp")
+        assert moved == [] and {w.id for w in could} == {heat.id, cool.id}
+        assert store.get(heat.id).check                          # nothing moved unasked
+        for watch in could:
+            watches.update(store, watch.id, sense="outside-temp")
+        moved_heat = store.get(heat.id)
+        assert moved_heat.sense == made.id and not moved_heat.check
+        assert moved_heat.every == "" and moved_heat.next_at is None
+        assert not moved_heat.armed and float(moved_heat.last_value) == 56   # kept
+        clock.read_now(made.id)
+        assert [w for w, _ in notes.sent] == [heat.id]           # not told twice
+        assert store.looks(heat.id)[0].outcome == "quiet"
+        assert len(caller.calls) == 3                            # two looks, one reading
+        clock.close()
+
+    def test_move_does_it_in_one_go_and_takes_the_watchs_pace(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        heat = hour_watch(store, every="30m")
+        hour_watch(store, name="Cool the guestroom", when={"above": 70})
+        made, moved, could = indriyas.from_watch(store, heat, name="outside-temp",
+                                                 move=True)
+        assert len(moved) == 2 and could == []
+        assert made.every == "30m" and made.pick == {"json": "temperature"}
+        assert all(w.sense == made.id for w in store.watches())
+        clock.close()
+
+    def test_a_different_call_starts_it_over(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        heat = hour_watch(store)
+        store.update(heat.id, last_value="56", armed=False, looked=True)
+        indriyas.create(store, name="other-temp", check={"tool": "weather_now",
+                        "args": {"place": "Apex"}}, pick={"json": "temperature"})
+        moved = watches.update(store, heat.id, sense="other-temp")
+        assert moved.armed and moved.last_value == "" and not moved.looked
+        clock.close()
+
+    def test_moving_is_a_change_of_its_own(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        heat = hour_watch(store)
+        outside(store)
+        with pytest.raises(WatchError, match="give --sense alone"):
+            watches.update(store, heat.id, sense="outside-temp", when={"below": 50})
+        clock.close()
+
+    def test_by_hand_at_the_terminal(self, tmp_path, capsys):
+        def run(*argv):
+            rc = cli.main(["--state", str(tmp_path), *argv])
+            out = capsys.readouterr()
+            return rc, out.out, out.err
+
+        assert run("add", "Heat", "--check", "weather_now", "--args", '{"place": "Cary"}',
+                   "--pick", "json:temperature", "--when", "below 60")[0] == 0
+        assert run("add", "Cool", "--check", "weather_now", "--args", '{"place": "Cary"}',
+                   "--pick", "json:temperature", "--when", "above 70")[0] == 0
+        heat = json.loads(run("list", "--json")[1])[0]["id"]
+        rc, out, err = run("indriya", "add", "outside-temp", "--from-watch", heat)
+        assert rc == 0, err
+        assert "each still calls itself" in out and "prahari edit ID --sense" in out
+        rc, out, err = run("edit", heat, "--sense", "outside-temp")
+        assert rc == 0, err
+        assert "senses outside-temp" in out
+        rc, out, err = run("add", "Damp", "--check", "weather_now", "--args",
+                           '{"place": "Cary"}', "--pick", "json:humidity",
+                           "--when", "above 80")
+        assert rc == 0, err
+        assert "It goes by the reading outside-temp" in out
+
+
+class TestFreshOnAsking:
+    def test_kept_value_young_enough_is_not_read_again(self, tmp_path):
+        caller = FakeCaller('{"temperature": 61}')
+        store, _ = make_clock(tmp_path, caller)
+        indriya = outside(store)
+        store.update_indriya(indriya.id, value="56", read_at=store_module.iso(
+            store_module.now_utc()))
+        got, said = indriyas.fresh(store, caller, store.get_indriya(indriya.id),
+                                   indriyas.max_age("10m"))
+        assert got.value == "56" and said == "" and caller.calls == []
+
+    def test_too_old_is_read_again_and_fires_nothing(self, tmp_path):
+        caller, notes = FakeCaller('{"temperature": 49}'), FakeNotifier()
+        store, clock = make_clock(tmp_path, caller, notifier=notes)
+        indriya = outside(store)
+        heat, _ = band(store)
+        store.update_indriya(indriya.id, value="56", read_at="2026-11-01T00:00:00+00:00",
+                             next_at="2030-01-01T00:00:00+00:00")
+        got, said = indriyas.fresh(store, caller, store.get_indriya(indriya.id),
+                                   indriyas.max_age("5m"))
+        assert got.value == "49" and said == "read again just now, as asked"
+        assert store.looks(heat.id) == [] and notes.sent == []   # the clock decides
+        assert got.next_at == "2030-01-01T00:00:00+00:00"        # its clock unmoved
+        assert store.readings(indriya.id)[0].why.startswith("Asked for fresh")
+        clock.close()
+
+    def test_not_twice_within_five_minutes_whoever_asks(self, tmp_path):
+        caller = FakeCaller('{"temperature": 49}')
+        store, _ = make_clock(tmp_path, caller)
+        indriya = outside(store)
+        indriyas.fresh(store, caller, indriya, indriyas.max_age("0"))
+        got, said = indriyas.fresh(store, caller, store.get_indriya(indriya.id),
+                                   indriyas.max_age("0"))
+        assert len(caller.calls) == 1 and "not made again within 5 minutes" in said
+        assert got.value == "49"
+
+    def test_a_failed_fresh_read_keeps_the_value_and_counts_nothing(self, tmp_path):
+        caller = FakeCaller(Called(ok=False, detail="down"))
+        store, _ = make_clock(tmp_path, caller)
+        indriya = outside(store)
+        store.update_indriya(indriya.id, value="56", read_at="2026-11-01T00:00:00+00:00")
+        got, said = indriyas.fresh(store, caller, store.get_indriya(indriya.id),
+                                   indriyas.max_age("5m"))
+        assert got.value == "56" and "did not read (failed: down)" in said
+        assert got.trouble == 0
+
+    def test_max_age_is_words_a_person_says(self):
+        assert indriyas.max_age("5m").total_seconds() == 300
+        assert indriyas.max_age(None) is None
+        with pytest.raises(WatchError, match="like 5m, 1h or 0"):
+            indriyas.max_age("soon")
+
+    def test_the_agent_asks_for_fresh(self, tmp_path):
+        caller = FakeCaller('{"temperature": 49}')
+        store = store_module.Store(tmp_path / "prahari.sqlite3")
+        indriya = outside(store)
+        store.update_indriya(indriya.id, value="56", read_at="2026-11-01T00:00:00+00:00")
+        tools = mcp.Tools(store, tmp_path, caller, person="local")
+        said = tools.call("read_indriya", {"name": "outside-temp", "max_age": "5m"})
+        assert said.startswith("outside-temp: 49 (just now)")
+        assert "(read again just now, as asked)" in said
+
+
+class TestUnusedItStops:
+    def test_a_month_unused_pauses_and_tells_its_owner(self, tmp_path):
+        caller, notes = FakeCaller(ANSWER), FakeNotifier()
+        store, clock = make_clock(tmp_path, caller, notifier=notes)   # 22 Oct 2026
+        indriya = outside(store)
+        store.update_indriya(indriya.id, used_at="2026-09-20T09:00:00+00:00",
+                             next_at="2026-10-22T09:00:00+00:00")
+        assert clock.tick() == [] and caller.calls == []
+        kept = store.get_indriya(indriya.id)
+        assert kept.state == "paused" and "nothing has used it for 32 days" in \
+            kept.paused_because
+        assert "Paused: indriya outside-temp" in notes.sent[0][1]
+        resumed = indriyas.resume(store, kept)
+        assert resumed.state == "active" and resumed.used_at       # its month again
+        clock.close()
+
+    def test_a_watch_sensing_it_or_a_reader_asking_keeps_it_going(self, tmp_path):
+        caller = FakeCaller(ANSWER)
+        store, clock = make_clock(tmp_path, caller)
+        indriya = outside(store)
+        band(store)
+        store.update_indriya(indriya.id, used_at="2026-09-20T09:00:00+00:00",
+                             next_at="2026-10-22T09:00:00+00:00")
+        [f.result() for f in clock.tick()]
+        kept = store.get_indriya(indriya.id)
+        assert kept.state == "active" and kept.used_at.startswith("2026-10-22")
+        lone = indriyas.create(store, name="pressure", check={"tool": "baro", "args": {}},
+                               pick={"number": ""})
+        indriyas.fresh(store, caller, lone, None)                # a reader asked
+        assert store.get_indriya(lone.id).used_at
         clock.close()

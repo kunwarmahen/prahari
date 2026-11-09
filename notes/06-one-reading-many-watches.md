@@ -184,19 +184,16 @@ trust them too. Naming the whole server (`prahari`) covers them already.
 
 ## What was deliberately not built
 
-* **Moving existing watches onto an indriya by themselves.** A new watch
-  on the same call as an indriya is not yet turned into one that senses
-  it, and the live guestroom pair still looks twice. Doing that silently
-  would change watches the person agreed to. It comes with a way to say
-  it in words first.
-* **A read that asks for fresh.** `read_indriya` answers with the value
-  and its age; "no older than 5 minutes, else look now" needs a cap on
-  how often a reader can make it look, and waits for one.
+* ~~**Moving existing watches onto an indriya by themselves.**~~ A new
+  watch on the same call senses it and says so; older ones move on the
+  person's word ([notes/07](07-one-call-by-itself.md)).
+* ~~**A read that asks for fresh.**~~ `max_age`, never within 5 minutes
+  of the last reading ([notes/07](07-one-call-by-itself.md#fresh-on-asking)).
 * **Values pushed in.** A Home Assistant thermometer posting its value
   to the inlet, instead of being looked at, belongs here and isn't here
   yet.
-* **Pausing an indriya nobody senses.** A watch with no end asks once a
-  month whether it's still wanted; an unused indriya doesn't yet.
+* ~~**Pausing an indriya nobody senses.**~~ Thirty days unused, it pauses
+  and says so ([notes/07](07-one-call-by-itself.md#unused-it-stops)).
 * **Code.** An indriya, like a recipe, is a call, a pick and a time. A
   source with no tool gets an MCP server through Setu, written or
   installed once, not a script that Prahari runs.

@@ -209,7 +209,20 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
            runner: str = "direct", agent: str = "", allow_tools: list[str] | None = None,
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
-           dvara=None, sense: str = "", home: set[str] | None = None) -> Watch:
+           dvara=None, sense: str = "", home: set[str] | None = None,
+           look_itself: bool = False, notes: list[str] | None = None) -> Watch:
+    """A new watch. ``notes`` gathers what Prahari decided on the person's
+    behalf, in words, for the caller to say: a watch on a call an indriya
+    already makes senses it instead (``look_itself`` says no)."""
+    if check and not sense and not look_itself and not wake and not renew:
+        reader = _reader(store, owner, check, every, home, notes)
+        if reader is not None:
+            return create(store, name=name, pick=pick if pick else None, when=when,
+                          then=then, asked=asked, thing=thing, starts=starts, ends=ends,
+                          stop=stop, zone=zone, owner=owner, runner=runner, agent=agent,
+                          allow_tools=allow_tools, wait=wait, time_limit=time_limit,
+                          max_per_day=max_per_day, created_via=created_via, dvara=dvara,
+                          sense=reader.id, home=home, notes=notes)
     sensed = None
     if sense:
         from prahari import indriyas
@@ -266,6 +279,50 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
     if parts["renew"]:
         watch.renew_at = iso(now_utc())     # the sender is asked to start knocking
     return store.add(watch)
+
+
+def _reader(store: Store, owner: str, check, every: str, home: set[str] | None,
+            notes: list[str] | None, dry: bool = False) -> object | None:
+    """The indriya a new watch on ``check`` should sense instead, or None.
+    The person's own is sped up to the watch's pace; a house one kept by
+    someone else is taken only when it is already as fresh as asked.
+    ``dry``: say what would happen (a preview), change nothing."""
+    from prahari import indriyas
+
+    try:
+        call = _call(recipe._form(check, "check"), "check")
+        wanted = recipe.every(every) if every else None
+    except (WatchError, recipe.RecipeError):
+        return None                    # checked() says what is wrong, in its words
+    reader = indriyas.reader_for(store, owner, call, home)
+    if reader is None:
+        return None
+    said = notes if notes is not None else []
+    if reader.state != "active":
+        said.append(f"{reader.name} reads this same call but is paused, so this watch "
+                    "looks itself")
+        return None
+    pace = recipe.every(reader.every)
+    if indriyas.is_own(reader, owner, home):
+        said.append(f"It goes by the reading {reader.name}, which already makes this "
+                    f"call, instead of calling again")
+        if wanted is not None and wanted < pace:
+            if dry:
+                said.append(f"{reader.name} would then read every "
+                            f"{recipe.duration_words(wanted)} (it reads every "
+                            f"{recipe.duration_words(pace)}), as often as this watch asks")
+            else:
+                said.append(indriyas.keep_up(store, reader, every))
+        return reader
+    if wanted is not None and wanted < pace:
+        said.append(f"{reader.name} ({reader.owner}'s) reads this same call every "
+                    f"{recipe.duration_words(pace)}, less often than asked, so this "
+                    "watch looks itself")
+        return None
+    said.append(f"It goes by the reading {reader.name} ({reader.owner}'s, shared with "
+                f"the house), which already makes this call every "
+                f"{recipe.duration_words(pace)}")
+    return reader
 
 
 def _passed(stamp: str | None) -> bool:
@@ -345,12 +402,16 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
                "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
-               "keep"}
+               "keep", "sense", "home"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
+    home = given.pop("home", None)
+    if given.get("sense"):
+        return _move_onto(store, watch, str(given.pop("sense")), home, given)
+    given.pop("sense", None)
     sensed = None
     if watch.sense:
         sensed = store.get_indriya(watch.sense)
@@ -422,6 +483,49 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         fields["next_at"] = parts["starts"]     # nothing is looked at before it starts
     store.update(watch.id, **fields)
     if recipe_keys & set(given):
+        store.forget_seen(watch.id)
+    return store.get(watch.id)
+
+
+def _move_onto(store: Store, watch: Watch, sense: str, home: set[str] | None,
+               rest: dict) -> Watch:
+    """A watch that looked itself, moved onto an indriya: it stops calling,
+    and decides on each of the indriya's readings instead.
+
+    WHAT IT REMEMBERED IS KEPT WHEN THE ANSWER IS THE SAME. An indriya on
+    the very call the watch made, read with the same pick, hands it the
+    same value it compared against before -- so the guestroom pair moved
+    onto ``outside-temp`` stays armed as it was, and doesn't fire again for
+    a line it had already told you about. A different call starts it over.
+    The person's own indriya is sped up to the watch's pace."""
+    from prahari import indriyas
+
+    if watch.sense or watch.listen:
+        raise WatchError(f"{watch.id} doesn't look itself (it "
+                         + ("senses an indriya" if watch.sense else "listens") + "), so "
+                         "there is nothing to move")
+    moving = {k for k, v in rest.items() if v is not None}
+    if moving - {"name", "asked", "thing", "then", "keep"}:
+        raise WatchError("moving onto an indriya is a change of its own: give --sense "
+                         "alone (or with a name); mend the rest after")
+    reader = indriyas.find(store, sense, watch.owner, home)
+    if reader.state != "active":
+        raise WatchError(f"{reader.name} is paused ({reader.paused_because or 'by hand'}): "
+                         "resume it first, or the watch would go quiet")
+    same = reader.check == watch.check and (not watch.pick or reader.pick == watch.pick)
+    fields: dict = {"sense": reader.id, "check": {}, "every": "", "wake": "",
+                    "renew": {}, "renew_at": None, "next_at": None,
+                    "pick": watch.pick or reader.pick,
+                    "thing": watch.thing or reader.thing}
+    if not same:
+        fields.update(armed=True, last_value="", trouble=0, looked=False)
+    if indriyas.is_own(reader, watch.owner, home) and watch.every:
+        indriyas.keep_up(store, reader, watch.every)
+    for key in ("name", "asked", "then"):
+        if rest.get(key) is not None:
+            fields[key] = str(rest[key]).strip()
+    store.update(watch.id, **fields)
+    if not same:
         store.forget_seen(watch.id)
     return store.get(watch.id)
 
@@ -561,6 +665,14 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
                             parts["every"], parts["thing"]))
     out: dict = {"sentence": said + push_words(parts["wake"], parts["renew"])
                  + span_words(span), "looked": False}
+    if store is not None and parts["check"] and not parts["wake"]:
+        # said before the person's yes: the watch would go by a reading
+        # already kept, not call again (watches.create does the same)
+        going: list[str] = []
+        if _reader(store, owner, parts["check"], every, home, going, dry=True):
+            out["reader"] = ". ".join(going) + "."
+        elif going:
+            out["reader"] = ". ".join(going) + "."
     twin = same_as(store, owner, parts) if store is not None else None
     if twin is not None:
         # Said before anything is looked at: the person is asked about the

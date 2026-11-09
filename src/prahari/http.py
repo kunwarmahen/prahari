@@ -12,7 +12,8 @@
     GET    /api/inlet                      the inlet's addresses and key, for a sender
     GET    /api/mailboxes                  the mail folders kept open (no passwords)
     GET    /api/indriyas                   every shared reading, with its value and age
-    GET    /api/indriyas/NAME              one, by name or id
+    GET    /api/indriyas/NAME?max_age=5m   one, by name or id (read again first when
+                                           older than max_age; not within 5 minutes)
     GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
     POST   /api/indriyas/NAME/look         read it now (202 at once)
     POST   /api/indriyas/NAME/pause | /resume
@@ -222,6 +223,8 @@ class Api:
                 watches.remove(self.store, watch.id)
                 return 200, {"removed": watch.id}
             if len(parts) == 2 and method == "PATCH":
+                # who counts as this person is Prahari's to say, never a body's
+                body = {k: v for k, v in body.items() if k != "home"}
                 return 200, watches.card(watches.update(self.store, watch.id, **body),
                                          self.store)
             if method == "POST" and action == "pause":
@@ -240,7 +243,10 @@ class Api:
         if len(parts) >= 2 and parts[0] == "indriyas":
             indriya = indriyas.find(self.store, parts[1])
             if len(parts) == 2 and method == "GET":
-                return 200, indriyas.card(indriya, self.store)
+                indriya, said = indriyas.fresh(
+                    self.store, self.clock.caller, indriya,
+                    indriyas.max_age(query.get("max_age", [None])[0]))
+                return 200, {**indriyas.card(indriya, self.store), "fresh": said}
             if parts[2:] == ["readings"] and method == "GET":
                 limit = _int(query.get("limit", ["50"])[0], "limit")
                 return 200, {"readings": [r.as_dict() for r in

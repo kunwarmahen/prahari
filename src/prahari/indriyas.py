@@ -29,6 +29,30 @@ own it takes the indriya's.
 AN INDRIYA IN USE IS NOT REMOVED. ``remove`` says which watches sense it:
 pulling a reading out from under a watch would leave it quiet for ever,
 which looks exactly like "nothing happened".
+
+ONE CALL IS ONE READING, BY ITSELF. A watch made on exactly the call an
+indriya already makes senses it instead (``reader_for``, used by
+``watches.create``), and says so; one asked to look more often speeds up
+the person's own indriya to its pace -- never someone else's, whose
+reading is theirs to set, and never below the five-minute floor. Watches
+made before the indriya are moved onto it only on the person's word
+(``prahari edit ID --sense NAME``, or ``indriya add --from ID --move``),
+because a watch they agreed to is theirs.
+
+FRESH ON ASKING, NOT ON EVERY ASK. A reader may say how old is too old
+(``fresh``, ``max_age``): an older value is read again then and there --
+but not sooner than ``FRESH_FLOOR`` after the last reading, whoever made
+it, so a chat asking in a loop cannot turn a fifteen-minute reading into
+a call a second. A fresh read only reads: it is not handed to the
+watches (a watch that fires might start a turn, and a reader's question
+would wait minutes on it), is not counted against the indriya, and does
+not move its clock. The next reading on the clock decides as always.
+
+UNUSED, IT STOPS. Every reading a watch decides on, and every reader
+that asks for the value, marks it used (``used_at``). Thirty days with
+neither and the clock pauses it and tells its owner, as a watch with no
+end asks once a month: a call every fifteen minutes with someone's
+accounts, for nothing, should not run for ever unnoticed.
 """
 
 from __future__ import annotations
@@ -47,6 +71,10 @@ _NAME = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
 #: How often an indriya reads when nobody says (it is a shared thing, so a
 #: little more often than a watch's hour).
 DEFAULT_EVERY = "15m"
+#: A fresh read is not made sooner than this after the last reading.
+FRESH_FLOOR = recipe.MIN_EVERY
+#: Unused this long (no watch decided on it, nobody asked), it pauses.
+UNUSED = timedelta(days=30)
 
 
 def max_indriyas() -> int:
@@ -191,14 +219,130 @@ def update(store: Store, indriya_id: str, **changes) -> Indriya:
     return store.get_indriya(current.id)
 
 
+def from_watch(store: Store, watch: Watch, *, name: str, share: str = "mine",
+               every: str = "", move: bool = False, home: set[str] | None = None,
+               created_via: str = "cli") -> tuple[Indriya, list[Watch], list[Watch]]:
+    """An indriya made from a watch's own call: its check, pick, thing,
+    road and how often (or ``every``). Returns it, the watches moved onto
+    it (``move``: every watch of this person's that makes the very same
+    call), and those that could be (not ``move``) -- the person decides."""
+    from prahari import watches as watches_module
+
+    if not watch.check:
+        raise WatchError(f"{watch.id} makes no call of its own (it "
+                         + ("senses an indriya" if watch.sense else "listens")
+                         + "), so there is nothing to make a reading from")
+    made = create(store, name=name, check=watch.check, pick=watch.pick,
+                  every=every or watch.every or DEFAULT_EVERY, thing=watch.thing,
+                  share=share, owner=watch.owner, runner=watch.runner, agent=watch.agent,
+                  created_via=created_via)
+    same = [w for w in store.watches(owner=watch.owner)
+            if w.check == watch.check and w.state != "ended"]
+    if not move:
+        return made, [], same
+    moved = [watches_module.update(store, w.id, sense=made.id, home=home) for w in same]
+    return store.get_indriya(made.id) or made, moved, []
+
+
+def reader_for(store: Store, owner: str, check: dict,
+               home: set[str] | None = None) -> Indriya | None:
+    """The indriya that already makes exactly this call, among those this
+    person may read: their own first, then the house's."""
+    for indriya in visible(store, owner, home):
+        if indriya.check == check:
+            return indriya
+    return None
+
+
+def is_own(indriya: Indriya, person: str, home: set[str] | None = None) -> bool:
+    names = {person} | (set(home or ()) if person in (home or ()) else set())
+    return indriya.owner in names
+
+
+def keep_up(store: Store, indriya: Indriya, every: str) -> str:
+    """The FASTEST NEED: a watch asked to look every ``every`` now goes by
+    this indriya, so it reads at least that often. Returns what changed,
+    in words ("" for nothing)."""
+    wanted, now = recipe.every(every), recipe.every(indriya.every)
+    if wanted >= now:
+        return ""
+    store.update_indriya(indriya.id, every=every.strip())
+    due = from_iso(indriya.next_at)
+    soon = now_utc() + wanted
+    if due is None or due > soon:
+        store.update_indriya(indriya.id, next_at=iso(soon))
+    return (f"{indriya.name} now reads every {recipe.duration_words(wanted)} (it read "
+            f"every {recipe.duration_words(now)}), as often as this watch asked")
+
+
+def used(store: Store, indriya: Indriya) -> None:
+    """A reader asked for its value: it is in use."""
+    store.update_indriya(indriya.id, used_at=iso(now_utc()))
+
+
+def unused_for(indriya: Indriya, now) -> timedelta:
+    since = from_iso(indriya.used_at) or from_iso(indriya.created_at) or now
+    return now - since
+
+
+def max_age(raw) -> timedelta | None:
+    """How old is too old, as a reader says it: "5m", "1h", "0" (always
+    fresh, up to the floor). None for not said."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    text = str(raw).strip().lower()
+    if text in ("0", "0m", "now"):
+        return timedelta(0)
+    match = re.match(r"^(\d{1,4})\s*(m|min|minutes?|h|hours?|d|days?)$", text)
+    if not match:
+        raise WatchError(f"max_age is how old is too old, like 5m, 1h or 0 -- not {raw!r}")
+    count, unit = int(match.group(1)), match.group(2)[0]
+    return timedelta(**{"m": {"minutes": count}, "h": {"hours": count},
+                        "d": {"days": count}}[unit])
+
+
+def fresh(store: Store, caller, indriya: Indriya, too_old: timedelta | None) -> tuple[Indriya, str]:
+    """Its value, read again first when it is older than ``too_old`` --
+    and the floor allows. Returns the indriya as it is now and a line
+    saying what happened ("" when the kept value was fresh enough)."""
+    from prahari.clock import take
+
+    used(store, indriya)
+    if too_old is None:
+        return store.get_indriya(indriya.id) or indriya, ""
+    now = now_utc()
+    read = from_iso(indriya.read_at)
+    if read is not None and now - read <= too_old:
+        return indriya, ""
+    if indriya.state != "active":
+        return indriya, (f"not read again: {indriya.name} is paused "
+                         f"({indriya.paused_because or 'by hand'})")
+    last = store.readings(indriya.id, limit=1)
+    tried = from_iso(last[0].at) if last else None
+    if tried is not None and now - tried < FRESH_FLOOR:
+        return indriya, (f"not read again: it was read {age_words(last[0].at)}, and a "
+                         f"reading is not made again within "
+                         f"{recipe.duration_words(FRESH_FLOOR)}")
+    reading, _ = take(caller, indriya, now)
+    reading.why = f"Asked for fresh by a reader. {reading.why}"
+    store.add_reading(reading)
+    if reading.outcome != "read":
+        return indriya, (f"read again, but it did not read ({reading.outcome}: "
+                         f"{reading.detail or reading.why}); the value below is the kept one")
+    store.update_indriya(indriya.id, value=reading.value, stored=reading.stored,
+                         read_at=reading.at)
+    return store.get_indriya(indriya.id) or indriya, "read again just now, as asked"
+
+
 def pause(store: Store, indriya: Indriya, because: str = "paused by you") -> Indriya:
     store.update_indriya(indriya.id, state="paused", paused_because=because)
     return store.get_indriya(indriya.id)
 
 
 def resume(store: Store, indriya: Indriya) -> Indriya:
+    # used from now: a reading paused as unused gets its month again
     store.update_indriya(indriya.id, state="active", paused_because="", trouble=0,
-                         next_at=iso(now_utc()))
+                         next_at=iso(now_utc()), used_at=iso(now_utc()))
     return store.get_indriya(indriya.id)
 
 

@@ -136,6 +136,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sense", default="", metavar="INDRIYA",
                    help="decide on an indriya's readings instead of looking (it has "
                         "no --check or --every of its own)")
+    p.add_argument("--look-itself", action="store_true", dest="look_itself",
+                   help="make its own call even when an indriya already makes it "
+                        "(by default it senses that indriya instead)")
     p.add_argument("--then", default="", metavar="PROMPT",
                    help="what the agent is asked when it fires (default: just tell you)")
     p.add_argument("--agent", default="", metavar="DIR|NAME",
@@ -163,6 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="keep it going: an ended watch looks again, and an open-ended "
                         "one stops asking for 30 days")
     p.add_argument("--max-per-day", type=int, default=None, dest="max_per_day")
+    p.add_argument("--sense", default=None, metavar="INDRIYA",
+                   help="stop looking and decide on this indriya's readings instead "
+                        "(what it remembered is kept when the indriya makes the same "
+                        "call)")
     p.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("list", help="every watch")
@@ -194,14 +201,20 @@ def build_parser() -> argparse.ArgumentParser:
     isub = p.add_subparsers(dest="indriya_command", required=True)
     i = isub.add_parser("add", help="a reading kept up to date")
     i.add_argument("name", help="one short word it is called by (outside-temp)")
-    i.add_argument("--check", metavar="TOOL", required=True,
+    i.add_argument("--check", metavar="TOOL", default=None,
                    help="the tool it reads with (it must read, or be this exact call)")
+    i.add_argument("--from-watch", metavar="ID", default=None, dest="from_watch",
+                   help="take the call, pick, thing and how often from this watch")
+    i.add_argument("--move", action="store_true",
+                   help="with --from-watch: move every watch of yours on that same call "
+                        "onto it (otherwise they are listed)")
     i.add_argument("--args", metavar="JSON", default=None, dest="check_args")
     i.add_argument("--pick", default=None,
                    help="what it keeps out of the answer: number[:REGEX], text:REGEX, "
                         "json:PATH ... (default: all of it)")
-    i.add_argument("--every", default=indriyas.DEFAULT_EVERY,
-                   help=f"how often it reads (default {indriyas.DEFAULT_EVERY})")
+    i.add_argument("--every", default=None,
+                   help=f"how often it reads (default {indriyas.DEFAULT_EVERY}, or the "
+                        "watch's with --from-watch)")
     i.add_argument("--thing", default="", metavar="WORDS",
                    help="what it reads: 'the outside temperature'")
     i.add_argument("--share", choices=("mine", "house"), default="mine",
@@ -231,6 +244,10 @@ def build_parser() -> argparse.ArgumentParser:
         i.add_argument("name")
         if name == "readings":
             i.add_argument("--limit", type=int, default=20)
+        else:
+            i.add_argument("--max-age", default=None, dest="max_age", metavar="AGE",
+                           help="read it again first if its value is older than this "
+                                "(5m, 1h; not within 5 minutes of the last reading)")
         i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
         i.add_argument("--json", action="store_true", dest="json_out")
     for name, text in (("look", "read once, now, and wait"),
@@ -415,11 +432,14 @@ def _dispatch(args, store: Store, state: Path) -> int:
             stop=parts["stop"], owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, allow_tools=args.allow_tools, max_per_day=args.max_per_day,
             wait=args.wait, time_limit=args.time_limit,
-            dvara=_dvara() if args.runner == "dvara" else None)
+            dvara=_dvara() if args.runner == "dvara" else None,
+            look_itself=args.look_itself, notes=(notes := []))
         if args.json_out:
-            print(json.dumps(watches.card(watch)))
+            print(json.dumps({**watches.card(watch), "notes": notes}))
         else:
             print(f"added {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
+            for note in notes:
+                print(f"  {note}")
             if serving(state) is None:
                 print("prahari serve is not running: nothing is looked at until it is")
         return 0
@@ -537,6 +557,10 @@ def _dispatch(args, store: Store, state: Path) -> int:
                 changes[key] = getattr(args, key)
         if args.wake == "":
             changes["wake"], changes["renew"] = "", {}
+        if args.sense:
+            changes = {k: v for k, v in changes.items()
+                       if k in ("name", "asked", "thing", "then")}
+            changes.update(sense=args.sense, home=_home())
         watch = watches.update(store, watch.id, **changes)
         print(json.dumps(watches.card(watch)) if args.json_out
               else f"updated {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
@@ -664,12 +688,40 @@ def _indriya(args, store: Store, state: Path) -> int:
     house's (read-only, unless they are this person's)."""
     sub = args.indriya_command
     home = _home()
+    if sub == "add" and args.from_watch:
+        if args.check or args.check_args or args.pick is not None:
+            raise watches.WatchError("--from-watch takes the call and pick from the watch; "
+                             "leave out --check, --args and --pick")
+        source = watches.find(store, args.from_watch,
+                              owner=args.as_actor or watches.LOCAL_OWNER)
+        made, moved, could = indriyas.from_watch(
+            store, source, name=args.name, share=args.share, every=args.every or "",
+            move=args.move, home=home)
+        if args.json_out:
+            print(json.dumps({**indriyas.card(made, store),
+                              "moved": [w.id for w in moved],
+                              "could_move": [w.id for w in could]}))
+            return 0
+        print(f"added indriya {made.name}: {indriyas.sentence(made)}")
+        for watch in moved:
+            print(f"  moved {watch.id} ({watch.name}) onto it: it no longer calls itself")
+        if could:
+            print("watches of yours on this same call (each still calls itself):")
+            for watch in could:
+                print(f"  {watch.id}  {watch.name}")
+            print(f"move them with: prahari edit ID --sense {made.name}   (or add again "
+                  "with --move)")
+        if serving(state) is None:
+            print("prahari serve is not running: nothing is read until it is")
+        return 0
     if sub == "add":
+        if not args.check:
+            raise watches.WatchError("an indriya needs --check TOOL (or --from-watch ID)")
         given = _json_args(args.check_args)
         made = indriyas.create(
             store, name=args.name, check={"tool": args.check, "args": given},
             pick=recipe.pick_from_text(args.pick) if args.pick is not None else {},
-            every=args.every, thing=args.thing, share=args.share,
+            every=args.every or "", thing=args.thing, share=args.share,
             owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, dvara=_dvara() if args.runner == "dvara" else None)
         if args.json_out:
@@ -698,10 +750,14 @@ def _indriya(args, store: Store, state: Path) -> int:
     indriya = indriyas.find(store, args.name, reader, home,
                             own_only=sub in ("edit", "pause", "resume", "rm", "look"))
     if sub == "get":
+        indriya, said = indriyas.fresh(store, _caller(state), indriya,
+                                       indriyas.max_age(args.max_age))
         if args.json_out:
-            print(json.dumps(indriyas.card(indriya, store)))
+            print(json.dumps({**indriyas.card(indriya, store), "fresh": said}))
         else:
             _print_indriya(indriya, store, full=True)
+            if said:
+                print(f"  ({said})")
         return 0
     if sub == "readings":
         found = store.readings(indriya.id, limit=args.limit)

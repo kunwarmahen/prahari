@@ -188,6 +188,9 @@ TOOLS: list[dict] = [
          "starts": _STARTS, "ends": _ENDS, "stop": _STOP,
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "listen": {"type": "string"}, "sense": _SENSE,
+         "look_itself": {"type": "boolean", "description": (
+             "true only when the person wants this watch to make its own call even "
+             "though an indriya already makes it (by default it senses that one)")},
          "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"},
          "allow_tools": {"type": "array", "items": {"type": "string"}},
@@ -212,6 +215,11 @@ TOOLS: list[dict] = [
              "one with no end stops asking whether it's wanted for 30 days")},
          "check": _CHECK, "pick": _PICK, "when": _WHEN, "every": _EVERY,
          "wake": _WAKE, "renew": _RENEW,
+         "sense": {"type": "string", "description": (
+             "move a watch that makes its own call onto this indriya (its name): it "
+             "stops calling and decides on each reading. Give it alone (a new name "
+             "may go with it); what it remembered is kept when the indriya makes "
+             "the same call")},
          "then": {"type": "string"},
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
          "required": ["id"]},
@@ -248,9 +256,16 @@ TOOLS: list[dict] = [
      "inputSchema": {"type": "object", "properties": {}},
      "annotations": {"readOnlyHint": True}},
     {"name": "read_indriya",
-     "description": "One indriya's value now, how old it is, and its recent readings.",
+     "description": (
+         "One indriya's value now, how old it is, and its recent readings. When the "
+         "kept value is too old for the question, give max_age: it is read again "
+         "first (the call the person already said yes to; not within 5 minutes of "
+         "the last reading)."),
      "inputSchema": {"type": "object", "properties": {
          "name": {"type": "string", "description": "its name (or id)"},
+         "max_age": {"type": "string", "description": (
+             "how old is too old for this question: 5m, 1h, or 0 for as fresh as "
+             "allowed")},
          "limit": {"type": "integer", "minimum": 1, "maximum": 50,
                    "description": "how many past readings (default 5)"}},
          "required": ["name"]},
@@ -267,8 +282,14 @@ TOOLS: list[dict] = [
          "name": _INDRIYA_NAME, "thing": _THING, "check": _CHECK, "pick": _PICK,
          "every": {"type": "string", "description": "how often it reads: 15m (default), "
                    "1h"},
-         "share": {"type": "string", "enum": ["mine", "house"]}},
-         "required": ["name", "check"]},
+         "share": {"type": "string", "enum": ["mine", "house"]},
+         "from_watch": {"type": "string", "description": (
+             "instead of check and pick: a watch's id, whose call, pick and how often "
+             "it takes")},
+         "move": {"type": "boolean", "description": (
+             "with from_watch: move every watch of the person's on that same call onto "
+             "it -- only when they said so")}},
+         "required": ["name"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
     {"name": "update_indriya",
      "description": (
@@ -336,6 +357,10 @@ class Tools:
                                stop=args.get("stop"), store=self.store, zone=self.zone,
                                sense=str(args.get("sense") or ""), home=self.home)
         lines = [f"The watch, in words: {said['sentence']}.", said.get("said", "")]
+        if said.get("reader"):
+            # its own line, after what it sees: tell the person both
+            lines.append(f"Reading already kept: {said['reader']} (look_itself: true "
+                         "makes it call on its own instead.)")
         asked = str(args.get("asked") or "").strip()
         if asked:
             # read back to the person before their yes: a reworded one is
@@ -424,8 +449,11 @@ class Tools:
             then=str(args.get("then") or ""), owner=self.person, runner=self.runner,
             agent=self.agent, allow_tools=[str(g) for g in allow],
             max_per_day=int(args.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY),
-            created_via="agent", dvara=self.dvara if self.runner == "dvara" else None)
+            created_via="agent", dvara=self.dvara if self.runner == "dvara" else None,
+            look_itself=bool(args.get("look_itself")), notes=(notes := []))
         said = f"Saved {made.id}: {made.name} -- {watches.sentence(made, self.store)}."
+        if notes:
+            said += " " + ". ".join(notes) + ". Tell the person."
         if serving(self.state) is None:
             said += (" Note: Prahari is not running on this machine, so it will not "
                      "look until `prahari serve` is started -- tell the person.")
@@ -434,8 +462,10 @@ class Tools:
     def _update_watch(self, args: dict) -> str:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
                                         "every", "then", "max_per_day", "wake", "renew",
-                                        "starts", "ends", "stop", "keep")
+                                        "starts", "ends", "stop", "keep", "sense")
                    if k in args}
+        if changes.get("sense"):
+            changes["home"] = self.home
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
                                **changes)
         return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch, self.store)}."
@@ -474,8 +504,12 @@ class Tools:
 
     def _read_indriya(self, args: dict) -> str:
         indriya = self._indriya(args)
+        indriya, fresh = indriyas.fresh(self.store, self.caller, indriya,
+                                        indriyas.max_age(args.get("max_age")))
         limit = max(1, min(int(args.get("limit") or 5), 50))
         lines = [f"{indriyas.reading_line(indriya)} -- {indriyas.sentence(indriya)}"]
+        if fresh:
+            lines.append(f"({fresh})")
         for reading in self.store.readings(indriya.id, limit=limit):
             lines.append(f"  {reading.at} {reading.outcome}"
                          + (f" {reading.value}" if reading.value else "")
@@ -483,6 +517,24 @@ class Tools:
         return "\n".join(lines)
 
     def _create_indriya(self, args: dict) -> str:
+        if args.get("from_watch"):
+            if args.get("check") or args.get("pick"):
+                raise ToolFailed("from_watch takes the call and pick from the watch; "
+                                 "leave out check and pick")
+            made, moved, could = indriyas.from_watch(
+                self.store, self._mine({"id": args["from_watch"]}),
+                name=str(args.get("name") or ""), share=str(args.get("share") or "mine"),
+                every=str(args.get("every") or ""), move=bool(args.get("move")),
+                home=self.home, created_via="agent")
+            said = f"Saved indriya {made.name}: {indriyas.sentence(made)}."
+            if moved:
+                said += (" Moved onto it, no longer calling themselves: "
+                         + ", ".join(f"{w.id} ({w.name})" for w in moved) + ".")
+            if could:
+                said += (" These watches make the same call and still call themselves: "
+                         + ", ".join(f"{w.id} ({w.name})" for w in could)
+                         + ". Offer to move them (update_watch with sense).")
+            return said
         made = indriyas.create(
             self.store, name=str(args.get("name") or ""), check=args.get("check"),
             pick=args.get("pick"), every=str(args.get("every") or ""),

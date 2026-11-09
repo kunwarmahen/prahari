@@ -191,6 +191,9 @@ class Indriya:
     value: str = ""
     stored: str = ""
     read_at: str | None = None
+    #: When something last used it: a watch decided on a reading, or a
+    #: reader asked for its value. Unused for a month, it pauses.
+    used_at: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -305,7 +308,8 @@ CREATE TABLE IF NOT EXISTS indriya (
     trouble INTEGER NOT NULL,
     value TEXT NOT NULL,
     stored TEXT NOT NULL,
-    read_at TEXT
+    read_at TEXT,
+    used_at TEXT
 );
 CREATE TABLE IF NOT EXISTS reading (
     id TEXT PRIMARY KEY,
@@ -379,7 +383,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("sense", "TEXT NOT NULL DEFAULT ''")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''")),
-          "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),)}
+          "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),),
+          "indriya": (("used_at", "TEXT"),)}
 
 
 class Store:

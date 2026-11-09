@@ -209,6 +209,8 @@ class Clock:
             due = from_iso(indriya.next_at)
             if due is None or due > now or self._busy(indriya.id):
                 continue
+            if self._unused(indriya, now):
+                continue
             self._claim_reading(indriya, now)
             started.append(self._submit_reading(indriya, "clock"))
         return started
@@ -293,6 +295,22 @@ class Clock:
         self._claim_reading(indriya, self.now())
         return self._submit_reading(indriya, "now")
 
+    def _unused(self, indriya: Indriya, now: datetime) -> bool:
+        """AN INDRIYA NOBODY USES STOPS. A reading no watch senses and no
+        reader asked for in a month is a call made every 15 minutes for
+        nothing, with the owner's accounts: it pauses, and its owner is
+        told, as a watch with no end is asked once a month."""
+        from prahari.indriyas import UNUSED, unused_for
+
+        if self.store.watches(state="active", sense=indriya.id):
+            return False
+        idle = unused_for(indriya, now)
+        if idle < UNUSED:
+            return False
+        self._pause_indriya(indriya, f"nothing has used it for {idle.days} days: no "
+                                     "watch senses it and nobody asked for its value")
+        return True
+
     def _claim_reading(self, indriya: Indriya, now: datetime) -> None:
         self.store.update_indriya(indriya.id, next_at=iso(now + recipe.every(indriya.every)))
 
@@ -303,42 +321,8 @@ class Clock:
 
     def _read(self, indriya: Indriya, came_by: str) -> Reading:
         """Read once; keep what was picked; hand the answer to its watches."""
-        from prahari.indriyas import probe
-
         try:
-            reading = Reading(id="", indriya=indriya.id, at=iso(self.now()))
-            try:
-                called = self.caller.call(probe(indriya))
-            except Exception as exc:       # a runner's bug is a failed reading
-                called = Called(ok=False, detail=f"{type(exc).__name__}: {exc}")
-            text = called.text or ""
-            reading.said = text[:SAID_KEPT]
-            turned = _turned_away(text) if called.ok else ""
-            if called.needs:
-                reading.outcome = "needs_person"
-                reading.detail = "; ".join(called.needs)
-                reading.why = ("The call could not run without you (a sign-in or a yes), "
-                               "so the indriya is paused until you see to it")
-            elif called.busy:
-                reading.outcome = "busy"
-                reading.detail = "busy: " + "; ".join(called.busy)
-                reading.why = "What the call needs was in use elsewhere; the next one tries"
-            elif not called.ok or turned:
-                reading.outcome = "failed"
-                reading.detail = turned or called.detail or "the call failed"
-                reading.why = ("The site turned the reading away (a bot check or a "
-                               "refusal)" if turned else "The call itself did not work")
-            else:
-                picked = recipe.apply(indriya.pick, text)
-                if picked.found:
-                    reading.value, reading.stored = picked.shown(), picked.stored()
-                    reading.why = f"Read {reading.value}"
-                else:
-                    reading.outcome = "broken"
-                    reading.why = ("The call answered, but the pick found nothing in it; "
-                                   "the page or the tool's answer may have changed")
-                    reading.detail = ("pick found nothing; it said: "
-                                      + " ".join(text.split())[:SAID_SHOWN])
+            reading, text = take(self.caller, indriya, self.now())
             self.store.add_reading(reading)
             if reading.outcome == "read":
                 self.store.update_indriya(indriya.id, value=reading.value,
@@ -368,9 +352,11 @@ class Clock:
     def _pass_down(self, indriya: Indriya, reading: Reading, text: str) -> None:
         """Each watch that senses it, judged on what it read -- or told,
         on its own looks, why there was nothing to judge."""
-        for watch in self.store.watches(state="active", sense=indriya.id):
-            if not _started(watch, self.now()):
-                continue
+        sensing = [w for w in self.store.watches(state="active", sense=indriya.id)
+                   if _started(w, self.now())]
+        if sensing:
+            self.store.update_indriya(indriya.id, used_at=iso(self.now()))
+        for watch in sensing:
             look = self.store.start_look(watch.id, "indriya", self.now())
             if reading.outcome == "read":
                 self._decide(watch, look, text)
@@ -822,6 +808,48 @@ class Clock:
                 self.on_record(watch, look)
             except Exception:
                 pass
+
+
+def take(caller: Caller, indriya: Indriya, now: datetime) -> tuple[Reading, str]:
+    """One reading's call and pick, and what came of it -- not kept,
+    not counted, not handed on: that is the caller's (the clock's own
+    reading, or a reader asking for a fresh one)."""
+    from prahari.indriyas import probe
+
+    reading = Reading(id="", indriya=indriya.id, at=iso(now))
+    try:
+        called = caller.call(probe(indriya))
+    except Exception as exc:       # a runner's bug is a failed reading
+        called = Called(ok=False, detail=f"{type(exc).__name__}: {exc}")
+    text = called.text or ""
+    reading.said = text[:SAID_KEPT]
+    turned = _turned_away(text) if called.ok else ""
+    if called.needs:
+        reading.outcome = "needs_person"
+        reading.detail = "; ".join(called.needs)
+        reading.why = ("The call could not run without you (a sign-in or a yes), "
+                       "so the indriya is paused until you see to it")
+    elif called.busy:
+        reading.outcome = "busy"
+        reading.detail = "busy: " + "; ".join(called.busy)
+        reading.why = "What the call needs was in use elsewhere; the next one tries"
+    elif not called.ok or turned:
+        reading.outcome = "failed"
+        reading.detail = turned or called.detail or "the call failed"
+        reading.why = ("The site turned the reading away (a bot check or a "
+                       "refusal)" if turned else "The call itself did not work")
+    else:
+        picked = recipe.apply(indriya.pick, text)
+        if picked.found:
+            reading.value, reading.stored = picked.shown(), picked.stored()
+            reading.why = f"Read {reading.value}"
+        else:
+            reading.outcome = "broken"
+            reading.why = ("The call answered, but the pick found nothing in it; "
+                           "the page or the tool's answer may have changed")
+            reading.detail = ("pick found nothing; it said: "
+                              + " ".join(text.split())[:SAID_SHOWN])
+    return reading, text
 
 
 def compose(watch: Watch, look: Look, store: Store | None = None) -> str:

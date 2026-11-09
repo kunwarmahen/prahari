@@ -301,6 +301,35 @@ never lets them call anything as you, or change it. It starts as
 that person sees them, which is how Dvara's `/indriyas` asks, so a
 private reading never reaches someone else's list.
 
+**One call stays one call, by itself.** A new watch on exactly the call
+an indriya already makes senses it instead, and says so; one that asked
+to look more often speeds up your own indriya to its pace (never someone
+else's: a house reading slower than asked is left alone, and the watch
+looks itself). `--look-itself` makes it call on its own anyway. Watches
+you made *before* the indriya move only when you say so, and keep what
+they remembered when the indriya makes the same call, so the guestroom's
+heat watch doesn't tell you 46 °F a second time:
+
+```bash
+prahari indriya add outside-temp --from-watch aa5afa6c   # its call, pick and pace;
+#   watches of yours on this same call (each still calls itself):
+#     aa5afa6c  Heat the guestroom
+#     f243cf84  Cool the guestroom
+prahari edit aa5afa6c --sense outside-temp                # one by one, or
+prahari indriya add outside-temp --from-watch aa5afa6c --move   # all at once
+```
+
+**Fresh on asking.** `prahari indriya get outside-temp --max-age 5m`
+(and `read_indriya`'s `max_age`, and `?max_age=` on the API) reads it
+again first when the kept value is older than that, with the call you
+already said yes to. Never within 5 minutes of the last reading,
+whoever asks, and a fresh read fires nothing: the next reading on the
+clock decides for the watches.
+
+**Unused, it stops.** An indriya no watch has decided on and nobody has
+asked for in 30 days pauses, and you're told. `resume` gives it another
+month.
+
 **The agent knows they're there.** Yantra names each reading the person
 may use in its prompt (what it reads and how often, never the value,
 which would be stale in minutes), so *"how cold is it outside?"* is
@@ -625,16 +654,17 @@ is on it, and every day and time their watches say is said on it.
 | `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer, and reads back `asked` as the watch's messages will say it |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
-| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches) |
-| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted |
+| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches); on a call an indriya already makes it senses that indriya and says so (`look_itself: true` for its own call) |
+| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
-| `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again |
-| `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check |
+| `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again; `max_age` reads it again first when it's older (not within 5 minutes) |
+| `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check. `from_watch` takes a watch's call, pick and pace; `move` moves the person's watches on that call onto it, on their word |
 | `update_indriya`, `delete_indriya` | mend or remove one of this person's own (removing is refused while a watch senses it) |
 
 `create_watch` and `preview_watch` take `sense` (an indriya's name) in
-place of a check.
+place of a check, and `preview_watch` says when a reading already makes
+the call, so the person hears it before saying yes.
 
 **The agent writes the recipe; you accept it.** The six reading tools
 say they only read, and the nine that change something don't, so Yantra
@@ -669,6 +699,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
 | **A band is two watches** | one number watched from both sides — heat below 60, cool above 70 — is two watches on the same check, one line each, each with its own `then`. Each fires once as its line is crossed, with no model asked to decide; a second line the *same* way is still refused ([notes/05](notes/05-a-look-says-why.md)) |
 | **One reading, many watches** | an indriya reads once for every watch that senses it, and each watch is judged on the whole answer by the rules above, as if it had looked itself. A failed reading is said on each watch's looks and counted once, against the indriya; one a watch still senses is never removed ([notes/06](notes/06-one-reading-many-watches.md)) |
+| **One call stays one call** | a new watch on a call an indriya makes senses it, and a faster one speeds up only the person's own indriya; older watches move only on the person's word, keeping what they remembered; a fresh read is never made within 5 minutes of the last and fires nothing; 30 days unused, it pauses ([notes/07](notes/07-one-call-by-itself.md)) |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
 | **A look is its person's** | on the Dvara road a look goes to Dvara as the watch's person, with their own accounts; never this computer's |
@@ -748,7 +779,10 @@ src/prahari/
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
 ├── indriyas.py  shared readings: make, mend, find (own first, then the
 │                house's), never removed while sensed; their words and age
-│                ([notes/06](notes/06-one-reading-many-watches.md))
+│                ([notes/06](notes/06-one-reading-many-watches.md)); made from
+│                a watch, found for a new watch on the same call, sped up to
+│                the fastest need, read fresh on asking, unused for a month
+│                ([notes/07](notes/07-one-call-by-itself.md))
 ├── clock.py     the rules above; the loop prahari serve runs; an indriya's
 │                readings, handed to each watch that senses it; a watch's
 │                days (it ends, asks, is removed); each look's why and
@@ -786,14 +820,16 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 221 tests. The API is not stable.
+tools work, and are covered by 240 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
 answered by the house's model ([notes/05](notes/05-a-look-says-why.md));
 an indriya on the outside temperature read once for three watches, and
 read again through the page's API and `prahari mcp`
-([notes/06](notes/06-one-reading-many-watches.md)).
+([notes/06](notes/06-one-reading-many-watches.md)); the guestroom pair
+moved onto it without telling you twice, and a local model asking for a
+fresh value ([notes/07](notes/07-one-call-by-itself.md)).
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a
