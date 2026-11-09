@@ -519,10 +519,10 @@ class Tools:
         lines = [f"{indriyas.reading_line(indriya)} -- {indriyas.sentence(indriya)}"]
         if fresh:
             lines.append(f"({fresh})")
-        for reading in self.store.readings(indriya.id, limit=limit):
-            lines.append(f"  {reading.at} {reading.outcome}"
-                         + (f" {reading.value}" if reading.value else "")
-                         + (f" -- {reading.why}" if reading.outcome != "read" else ""))
+        # each reading with what this person's watches decided on it: the
+        # answer to "why didn't my guestroom watch fire?"
+        rows = indriyas.history(self.store, indriya, limit, self._names())
+        lines += ["  " + line for line in indriyas.history_lines(rows)]
         return "\n".join(lines)
 
     def _create_indriya(self, args: dict) -> str:

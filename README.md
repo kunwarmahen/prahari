@@ -281,7 +281,8 @@ prahari indriya look outside-temp      # read once, now; each watch decides on i
 prahari indriya list                   # every reading, its value and age, who senses it
 prahari indriya list --as asha --json  # as asha sees them: her own, then the house's
 prahari indriya get outside-temp --json
-prahari indriya readings outside-temp  # its history, newest first (the last 500)
+prahari indriya readings outside-temp  # what happened: each reading, how it came, and what
+                                       # every watch decided on it (--full: why, what came in)
 prahari indriya edit outside-temp --every 30m    # also --check/--args/--pick/--share
 prahari indriya pause outside-temp | resume outside-temp | rm outside-temp
 ```
@@ -354,6 +355,13 @@ again. A knock reaches only its own key's person's indriyas.
 **Unused, it stops.** An indriya no watch has decided on and nobody has
 asked for in 30 days pauses, and you're told. `resume` gives it another
 month.
+
+**What happened to it.** Each reading says how it came (its clock, by
+hand, asked for fresh, sent in, or nothing came in time) and what every
+watch on it decided, so *"why didn't my guestroom watch fire?"* has one
+answer: **Readings** under each indriya on this page and on Yantra's
+Watches panel, `/indriyas 2` in a chat, `read_indriya` for the agent
+([notes/09](notes/09-what-happened-to-a-reading.md)).
 
 **The agent knows they're there.** Yantra names each reading the person
 may use in its prompt (what it reads and how often, never the value,
@@ -655,7 +663,7 @@ GET    /api/inlet                        the inlet's addresses, key, words, peop
 GET    /api/mailboxes                    the mail folders kept open (no passwords)
 GET    /api/indriyas                     every indriya, with its value, age, who senses it
 GET    /api/indriyas/NAME                one, by name or id
-GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
+GET    /api/indriyas/NAME/readings?limit=N   its history, newest first, each with what its watches decided
 POST   /api/indriyas/NAME/look | /pause | /resume   (look answers 202 at once)
 POST   /inlet/WORD                       the inlet (an inlet key; also on --inlet-port alone)
 POST   /inlet/indriya/NAME               a value for a pushed indriya: {"value": 68.2} or the number alone
@@ -847,7 +855,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 254 tests. The API is not stable.
+tools work, and are covered by 261 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,

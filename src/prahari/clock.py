@@ -332,7 +332,8 @@ class Clock:
         its watches, as a reading the clock took would be. Its deadline
         starts again from now."""
         now = self.now()
-        reading = Reading(id="", indriya=indriya.id, at=iso(now), said=text[:SAID_KEPT])
+        reading = Reading(id="", indriya=indriya.id, at=iso(now), said=text[:SAID_KEPT],
+                          came_by="pushed")
         picked = recipe.apply(indriya.pick, text)
         if picked.found and picked.shown().strip().lower() in NO_VALUE:
             # A SENDER THAT SAYS IT DOESN'T KNOW. Home Assistant sends
@@ -366,7 +367,7 @@ class Clock:
         on it, exactly like a temperature that never crosses the line. So
         it is a failed reading, said on each watch and counted once."""
         reading = Reading(
-            id="", indriya=indriya.id, at=iso(self.now()), outcome="failed",
+            id="", indriya=indriya.id, at=iso(self.now()), outcome="failed", came_by="silence",
             detail=f"nothing pushed in for {_for(recipe.every(indriya.every))}",
             why=("Nothing was sent in within its every: the sender (a Home Assistant "
                  "automation, a script) may have stopped"))
@@ -394,6 +395,7 @@ class Clock:
         """Read once; keep what was picked; hand the answer to its watches."""
         try:
             reading, text = take(self.caller, indriya, self.now())
+            reading.came_by = came_by
             self.store.add_reading(reading)
             if reading.outcome == "read":
                 self.store.update_indriya(indriya.id, value=reading.value,
@@ -424,6 +426,7 @@ class Clock:
             self.store.update_indriya(indriya.id, used_at=iso(self.now()))
         for watch in sensing:
             look = self.store.start_look(watch.id, "indriya", self.now())
+            look.reading = reading.id         # which reading it judged, for its history
             if reading.outcome == "read":
                 self._decide(watch, look, text)
                 continue

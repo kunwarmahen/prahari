@@ -214,6 +214,10 @@ class Reading:
     detail: str = ""
     #: The start of what the call answered.
     said: str = ""
+    #: How it came: "clock", "now" (a person asked for one), "asked" (a
+    #: reader wanted it fresher), "pushed" (sent in), "silence" (a
+    #: pushed one's deadline passed with nothing).
+    came_by: str = "clock"
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -244,6 +248,8 @@ class Look:
     why: str = ""
     #: The start of what the check answered, as it came.
     said: str = ""
+    #: The indriya reading it decided on, for a watch that senses one.
+    reading: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -386,7 +392,9 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("zone", "TEXT NOT NULL DEFAULT ''"),
                     ("sense", "TEXT NOT NULL DEFAULT ''")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
-                   ("said", "TEXT NOT NULL DEFAULT ''")),
+                   ("said", "TEXT NOT NULL DEFAULT ''"),
+                   ("reading", "TEXT NOT NULL DEFAULT ''")),
+          "reading": (("came_by", "TEXT NOT NULL DEFAULT 'clock'"),),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),),
           "indriya": (("used_at", "TEXT"), ("pushed", "INTEGER NOT NULL DEFAULT 0"))}
 
@@ -404,6 +412,7 @@ class Store:
                 for name, kind in added:
                     if name not in have:
                         db.execute(f'ALTER TABLE {table} ADD COLUMN "{name}" {kind}')
+            db.execute("CREATE INDEX IF NOT EXISTS look_by_reading ON look (reading)")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
@@ -626,6 +635,20 @@ class Store:
                 "reading WHERE indriya = ? ORDER BY at DESC, rowid DESC LIMIT ?)",
                 (reading.indriya, reading.indriya, READINGS_KEPT))
         return reading
+
+    def decided_on(self, reading_ids: list[str]) -> dict[str, list[Look]]:
+        """The looks each reading was handed to, by reading id."""
+        out: dict[str, list[Look]] = {r: [] for r in reading_ids}
+        if not reading_ids:
+            return out
+        marks = ",".join("?" * len(reading_ids))
+        with self._db() as db:
+            rows = db.execute(f"SELECT * FROM look WHERE reading IN ({marks}) "
+                              "ORDER BY started_at", reading_ids).fetchall()
+        for row in rows:
+            look = _load(Look, row)
+            out.setdefault(look.reading, []).append(look)
+        return out
 
     def readings(self, indriya_id: str, limit: int = 50) -> list[Reading]:
         with self._db() as db:

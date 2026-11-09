@@ -384,6 +384,7 @@ def fresh(store: Store, caller, indriya: Indriya, too_old: timedelta | None) -> 
                          f"{recipe.duration_words(FRESH_FLOOR)}")
     reading, _ = take(caller, indriya, now)
     reading.why = f"Asked for fresh by a reader. {reading.why}"
+    reading.came_by = "asked"
     store.add_reading(reading)
     if reading.outcome != "read":
         return indriya, (f"read again, but it did not read ({reading.outcome}: "
@@ -471,6 +472,71 @@ def card(indriya: Indriya, store: Store | None = None) -> dict:
         last = store.readings(indriya.id, limit=1)
         data["last_reading"] = last[0].as_dict() if last else None
     return data
+
+
+#: How a reading came, in words.
+CAME_WORDS = {"clock": "on its clock", "now": "read now, by hand",
+              "asked": "asked for fresh by a reader", "pushed": "sent in",
+              "silence": "nothing came in time"}
+
+
+def history(store: Store, indriya: Indriya, limit: int = 20,
+            people: set[str] | None = None) -> list[dict]:
+    """Its readings, newest first, each with what every watch decided on
+    it -- the indriya's answer to "what happened?", as a watch's looks
+    are for a watch.
+
+    ANOTHER PERSON'S WATCHES ARE COUNTED, NOT SHOWN. A house reading is
+    sensed by other people's watches too; ``people`` (None: anyone's, for
+    the computer's own page) sees its own by name and the rest as a
+    number, since what someone else watches for is theirs."""
+    found = store.readings(indriya.id, limit=max(1, min(int(limit), 500)))
+    decided = store.decided_on([r.id for r in found])
+    names = {w.id: w for w in store.watches(sense=indriya.id)}
+    out = []
+    for reading in found:
+        row = reading.as_dict()
+        row["came_words"] = CAME_WORDS.get(reading.came_by, reading.came_by)
+        mine, others = [], 0
+        for look in decided.get(reading.id, []):
+            watch = names.get(look.watch) or store.get(look.watch)
+            if watch is not None and people is not None and watch.owner not in people:
+                others += 1
+                continue
+            mine.append({"watch": look.watch, "name": watch.name if watch else look.watch,
+                         "outcome": look.outcome, "why": look.why, "value": look.value,
+                         "found": look.found, "turn": look.turn,
+                         "notified": look.notified})
+        row["decided"] = mine
+        row["others"] = others
+        out.append(row)
+    return out
+
+
+def history_lines(rows: list[dict], *, full: bool = False, when=None) -> list[str]:
+    """A history in lines, for a terminal or a chat. ``when``: how a time
+    is said (default: as stored)."""
+    lines = []
+    for row in rows:
+        value = f" {row['value']}" if row.get("value") else ""
+        at = when(row["at"]) if when else row["at"]
+        lines.append(f"{at}  {row['outcome']}{value}  ({row['came_words']})")
+        if row["outcome"] != "read" or full:
+            lines.append(f"    why: {row.get('why') or ''}")
+            if row.get("detail"):
+                lines.append(f"    {row['detail']}")
+        if full and row.get("said"):
+            lines.append(f"    came in: {' '.join(row['said'].split())[:300]}")
+        for look in row["decided"]:
+            told = " -- told you" if look.get("notified") else ""
+            lines.append(f"    → {look['name']}: {look['outcome']}{told}")
+            if full and look.get("why"):
+                lines.append(f"        {look['why']}")
+        if row.get("others"):
+            lines.append(f"    → and {row['others']} of other people's watches")
+        if not row["decided"] and not row.get("others") and row["came_by"] == "asked":
+            lines.append("    (read on asking: no watch decides on these)")
+    return lines
 
 
 def probe(indriya: Indriya) -> Watch:

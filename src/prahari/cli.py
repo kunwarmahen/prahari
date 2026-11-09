@@ -247,6 +247,9 @@ def build_parser() -> argparse.ArgumentParser:
         i.add_argument("name")
         if name == "readings":
             i.add_argument("--limit", type=int, default=20)
+            i.add_argument("--full", action="store_true",
+                           help="each reading's why and what came in, and each "
+                                "watch's why")
         else:
             i.add_argument("--max-age", default=None, dest="max_age", metavar="AGE",
                            help="read it again first if its value is older than this "
@@ -822,14 +825,18 @@ def _indriya(args, store: Store, state: Path) -> int:
                 print(f"  ({said})")
         return 0
     if sub == "readings":
-        found = store.readings(indriya.id, limit=args.limit)
+        # at the computer every watch is shown; --as, as that person sees it
+        people = None
+        if getattr(args, "as_actor", ""):
+            people = {args.as_actor} | (home if args.as_actor in home else set())
+        rows = indriyas.history(store, indriya, args.limit, people)
         if args.json_out:
-            print(json.dumps([r.as_dict() for r in found]))
+            print(json.dumps(rows))
             return 0
-        if not found:
+        if not rows:
             print("no readings yet")
-        for reading in found:
-            _print_reading(reading)
+        for line in indriyas.history_lines(rows, full=args.full, when=_short):
+            print(line)
         return 0
     if sub == "edit":
         changes = {"pick": recipe.pick_from_text(args.pick) if args.pick is not None

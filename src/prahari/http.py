@@ -259,8 +259,8 @@ class Api:
                 return 200, {**indriyas.card(indriya, self.store), "fresh": said}
             if parts[2:] == ["readings"] and method == "GET":
                 limit = _int(query.get("limit", ["50"])[0], "limit")
-                return 200, {"readings": [r.as_dict() for r in
-                                          self.store.readings(indriya.id, min(limit, 500))]}
+                return 200, {"readings": indriyas.history(self.store, indriya,
+                                                          min(limit, 500))}
             if parts[2:] == ["look"] and method == "POST":
                 try:
                     self.clock.start_reading(indriya.id)

@@ -237,7 +237,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
                                          hour: "2-digit", minute: "2-digit" }); };
   const words = { learned: "learned", quiet: "quiet", fired: "fired", limited: "limited",
     broken: "broken", failed: "failed", needs_person: "needs you", running: "looking",
-    interrupted: "stopped" };
+    interrupted: "stopped", read: "read", busy: "busy" };
   function fail(err) { $("error").textContent = String(err.message || err);
                        $("error").classList.remove("hidden"); }
   let lookingAt = null;
@@ -343,10 +343,45 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       ${l.reply ? `<details><summary>What the agent said</summary><pre>${esc(l.reply)}</pre></details>` : ""}`;
   }
 
+  // An indriya's readings, like a watch's looks: each opens on how it
+  // came, why, what came in, and what every watch on it decided.
+  const readingsOpen = new Set();
+  // a reading opened stays open when the page refreshes itself
+  const readingOpen = new Set();
+  let readingsOf = {};
+  function readingInFull(r) {
+    const rows = [];
+    const row = (k, v) => { if (v) rows.push(`<dt>${k}</dt><dd>${v}</dd>`); };
+    row("Came", esc(r.came_words));
+    row("Why", esc(r.why));
+    if (r.detail && r.detail !== r.why) row("What went wrong", esc(r.detail));
+    row("Kept", r.value ? `<code>${esc(r.value)}</code>` : "");
+    const decided = r.decided.map((d) => `<li><b>${esc(d.name)}</b>
+        <span class="out ${esc(d.outcome)}">${esc(words[d.outcome] || d.outcome)}</span>
+        ${d.notified ? " · told you" : ""}${d.why ? `<div class="why">${esc(d.why)}</div>` : ""}</li>`);
+    if (r.others) decided.push(`<li>and ${r.others} of other people's watches</li>`);
+    row("Watches", decided.length ? `<ul class="found">${decided.join("")}</ul>`
+        : (r.came_by === "asked" ? "read on asking: no watch decides on these" : "none sensed it then"));
+    return `<dl class="full">${rows.join("")}</dl>
+      ${r.said ? `<details><summary>What came in</summary><pre>${esc(r.said)}</pre></details>` : ""}`;
+  }
+  function readingsList(name) {
+    const got = readingsOf[name] || [];
+    return `<ul class="looks">${got.length ? got.map((r) => `<li><details data-reading="${esc(r.id)}" ${readingOpen.has(r.id) ? "open" : ""}>
+      <summary><span class="when">${when(r.at)}</span>
+      <span class="out ${esc(r.outcome)}">${esc(words[r.outcome] || r.outcome)}</span>
+      ${esc(r.value)} · ${esc(r.came_words)}${r.decided.length
+        ? " · " + r.decided.map((d) => `${esc(d.name)}: ${esc(words[d.outcome] || d.outcome)}`).join(", ") : ""}</summary>
+      ${readingInFull(r)}</details></li>`).join("") : `<li class="empty">No readings yet.</li>`}</ul>`;
+  }
+
   let senseNames = {};
   async function senses() {
     const { indriyas } = await api("GET", "indriyas");
     senseNames = Object.fromEntries(indriyas.map((i) => [i.id, i.name]));
+    for (const name of readingsOpen) {
+      readingsOf[name] = (await api("GET", `indriyas/${encodeURIComponent(name)}/readings?limit=20`)).readings;
+    }
     $("indriyas").innerHTML = indriyas.length ? indriyas.map((i) => `
       <div class="watch" data-indriya="${esc(i.name)}">
         <div class="top"><span class="name">${esc(i.name)}</span>
@@ -359,8 +394,10 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
         <div class="last">${i.read_at ? `read ${esc(i.age)}` : "not read yet"}${i.state === "active" && i.next_at ? (i.pushed ? ` · expected by ${when(i.next_at)}` : ` · next ${when(i.next_at)}`) : ""}
           ${i.last_reading && i.last_reading.outcome !== "read" ? ` · last: <span class="out ${esc(i.last_reading.outcome)}">${esc(words[i.last_reading.outcome] || i.last_reading.outcome)}</span> ${esc(i.last_reading.why)}` : ""}</div>
         <div class="last">${i.sensed_by.length ? "sensed by " + i.sensed_by.map((w) => esc(w.name)).join(", ") : "no watch senses it yet"}</div>
-        <div class="acts">${i.pushed ? "" : `<button class="btn link" data-act="look">Read now</button>`}
+        <div class="acts"><button class="btn link" data-act="readings">${readingsOpen.has(i.name) ? "Hide readings" : "Readings"}</button>
+          ${i.pushed ? "" : `<button class="btn link" data-act="look">Read now</button>`}
           <button class="btn link" data-act="${i.state === "paused" ? "resume" : "pause"}">${i.state === "paused" ? "Resume" : "Pause"}</button></div>
+        ${readingsOpen.has(i.name) ? readingsList(i.name) : ""}
       </div>`).join("")
       : `<p class="hint">An indriya reads one number (or line) for everyone: the outside
         temperature, a price. Watches <i>sense</i> it instead of each calling out, and your
@@ -368,9 +405,18 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
         <code>prahari indriya add outside-temp --check TOOL --args JSON --pick number --every 15m</code>,
         or one Home Assistant sends in: <code>prahari indriya add guestroom-temp --pushed</code>.</p>`;
   }
+  $("indriyas").addEventListener("toggle", (e) => {
+    const id = e.target.dataset && e.target.dataset.reading; if (!id) return;
+    if (e.target.open) readingOpen.add(id); else readingOpen.delete(id);
+  }, true);
   $("indriyas").addEventListener("click", async (e) => {
     const btn = e.target.closest("button[data-act]"); if (!btn) return;
     const name = btn.closest("[data-indriya]").dataset.indriya;
+    if (btn.dataset.act === "readings") {
+      if (readingsOpen.has(name)) readingsOpen.delete(name); else readingsOpen.add(name);
+      try { await senses(); } catch (err) { fail(err); }
+      return;
+    }
     try {
       await api("POST", `indriyas/${encodeURIComponent(name)}/${btn.dataset.act}`);
       if (btn.dataset.act === "look") btn.textContent = "Reading…";
