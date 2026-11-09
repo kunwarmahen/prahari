@@ -562,6 +562,23 @@ class TestMovingWatchesOnto:
         assert made["owner"] == "owner" and len(made["moved"]) == 2
         assert made["thing"] == "the outside temperature in °F"     # their words win
 
+    def test_added_again_with_move_moves_onto_the_one_it_made(self, tmp_path, capsys):
+        """The first add lists the watches and says to run it again with
+        --move: that second run moves them, not "already has one"."""
+        store = store_module.Store(tmp_path / "prahari.sqlite3")
+        heat = hour_watch(store)
+        hour_watch(store, name="Cool the guestroom", when={"above": 70})
+        del store
+        argv = ["--state", str(tmp_path), "indriya", "add", "outside-temp",
+                "--from-watch", heat.id]
+        assert cli.main(argv) == 0
+        assert "this same command again, with --move" in capsys.readouterr().out
+        assert cli.main([*argv, "--move"]) == 0
+        out = capsys.readouterr().out
+        assert out.startswith("moved onto indriya outside-temp") and out.count("moved ") == 3
+        other = store_module.Store(tmp_path / "prahari.sqlite3")
+        assert len(other.indriyas()) == 1 and all(w.sense for w in other.watches())
+
 class TestFreshOnAsking:
     def test_kept_value_young_enough_is_not_read_again(self, tmp_path):
         caller = FakeCaller('{"temperature": 61}')

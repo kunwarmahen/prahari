@@ -820,7 +820,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 241 tests. The API is not stable.
+tools work, and are covered by 242 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,

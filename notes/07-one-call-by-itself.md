@@ -191,6 +191,14 @@ added indriya outside-temp: reads the outside temperature in °F every hour: …
   moved 9a92df06 (Guestroom cool when above 70°F) onto it: it no longer calls itself
 ```
 
+Then the second snag. Run without `--move` first, the add made the
+reading and said *"or add again with --move"*. Added again, it answered
+*"already has an indriya called outside-temp"*. Its own advice didn't
+work. Now the same command again with `--move` moves the watches onto
+the reading it already made (*moved onto indriya outside-temp …*), as
+long as that reading makes the same call. One that makes a different
+call under that name is still refused.
+
 ## Not here
 
 * **Slowing back down.** An indriya sped up for a watch stays fast after

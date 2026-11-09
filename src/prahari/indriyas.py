@@ -233,10 +233,19 @@ def from_watch(store: Store, watch: Watch, *, name: str, share: str = "mine",
         raise WatchError(f"{watch.id} makes no call of its own (it "
                          + ("senses an indriya" if watch.sense else "listens")
                          + "), so there is nothing to make a reading from")
-    made = create(store, name=name, check=watch.check, pick=watch.pick,
-                  every=every or watch.every or DEFAULT_EVERY, thing=thing or watch.thing,
-                  share=share, owner=watch.owner, runner=watch.runner, agent=watch.agent,
-                  created_via=created_via, dvara=dvara)
+    # ADDED AGAIN WITH --move IS THE MOVE. The first add listed the watches
+    # and said to add again with --move; the reading it made is the one,
+    # when it makes the same call -- not "already has one called that".
+    kept = next((i for i in store.indriyas(owner=watch.owner)
+                 if i.name == (name or "").strip().lower()), None)
+    if kept is not None and kept.check == watch.check and move:
+        made = kept
+    else:
+        made = create(store, name=name, check=watch.check, pick=watch.pick,
+                      every=every or watch.every or DEFAULT_EVERY,
+                      thing=thing or watch.thing, share=share, owner=watch.owner,
+                      runner=watch.runner, agent=watch.agent, created_via=created_via,
+                      dvara=dvara)
     same = [w for w in store.watches(owner=watch.owner)
             if w.check == watch.check and w.state != "ended"]
     if not move:

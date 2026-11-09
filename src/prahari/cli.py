@@ -695,6 +695,8 @@ def _indriya(args, store: Store, state: Path) -> int:
         # at the terminal any watch is the person's to name, as for `edit`:
         # one made from a chat is filed under their Dvara name, not local
         source = watches.find(store, args.from_watch, owner=args.as_actor or None)
+        there = any(i.name == args.name.strip().lower()
+                    for i in store.indriyas(owner=source.owner))
         made, moved, could = indriyas.from_watch(
             store, source, name=args.name, share=args.share, every=args.every or "",
             move=args.move, home=home,
@@ -704,15 +706,16 @@ def _indriya(args, store: Store, state: Path) -> int:
                               "moved": [w.id for w in moved],
                               "could_move": [w.id for w in could]}))
             return 0
-        print(f"added indriya {made.name}: {indriyas.sentence(made)}")
+        print(f"{'moved onto' if args.move and there else 'added'} "
+              f"indriya {made.name}: {indriyas.sentence(made)}")
         for watch in moved:
             print(f"  moved {watch.id} ({watch.name}) onto it: it no longer calls itself")
         if could:
             print("watches of yours on this same call (each still calls itself):")
             for watch in could:
                 print(f"  {watch.id}  {watch.name}")
-            print(f"move them with: prahari edit ID --sense {made.name}   (or add again "
-                  "with --move)")
+            print(f"move them with: prahari edit ID --sense {made.name}   (or this same "
+                  "command again, with --move)")
         if serving(state) is None:
             print("prahari serve is not running: nothing is read until it is")
         return 0
