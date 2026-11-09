@@ -221,7 +221,8 @@ def update(store: Store, indriya_id: str, **changes) -> Indriya:
 
 def from_watch(store: Store, watch: Watch, *, name: str, share: str = "mine",
                every: str = "", move: bool = False, home: set[str] | None = None,
-               created_via: str = "cli") -> tuple[Indriya, list[Watch], list[Watch]]:
+               created_via: str = "cli", dvara=None,
+               thing: str = "") -> tuple[Indriya, list[Watch], list[Watch]]:
     """An indriya made from a watch's own call: its check, pick, thing,
     road and how often (or ``every``). Returns it, the watches moved onto
     it (``move``: every watch of this person's that makes the very same
@@ -233,9 +234,9 @@ def from_watch(store: Store, watch: Watch, *, name: str, share: str = "mine",
                          + ("senses an indriya" if watch.sense else "listens")
                          + "), so there is nothing to make a reading from")
     made = create(store, name=name, check=watch.check, pick=watch.pick,
-                  every=every or watch.every or DEFAULT_EVERY, thing=watch.thing,
+                  every=every or watch.every or DEFAULT_EVERY, thing=thing or watch.thing,
                   share=share, owner=watch.owner, runner=watch.runner, agent=watch.agent,
-                  created_via=created_via)
+                  created_via=created_via, dvara=dvara)
     same = [w for w in store.watches(owner=watch.owner)
             if w.check == watch.check and w.state != "ended"]
     if not move:

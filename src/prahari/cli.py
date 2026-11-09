@@ -692,11 +692,13 @@ def _indriya(args, store: Store, state: Path) -> int:
         if args.check or args.check_args or args.pick is not None:
             raise watches.WatchError("--from-watch takes the call and pick from the watch; "
                              "leave out --check, --args and --pick")
-        source = watches.find(store, args.from_watch,
-                              owner=args.as_actor or watches.LOCAL_OWNER)
+        # at the terminal any watch is the person's to name, as for `edit`:
+        # one made from a chat is filed under their Dvara name, not local
+        source = watches.find(store, args.from_watch, owner=args.as_actor or None)
         made, moved, could = indriyas.from_watch(
             store, source, name=args.name, share=args.share, every=args.every or "",
-            move=args.move, home=home)
+            move=args.move, home=home,
+            dvara=_dvara() if source.runner == "dvara" else None, thing=args.thing)
         if args.json_out:
             print(json.dumps({**indriyas.card(made, store),
                               "moved": [w.id for w in moved],

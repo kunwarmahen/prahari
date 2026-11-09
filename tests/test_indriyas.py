@@ -547,6 +547,21 @@ class TestMovingWatchesOnto:
         assert "It goes by the reading outside-temp" in out
 
 
+    def test_a_watch_made_from_a_chat_is_found_at_the_terminal(self, tmp_path, capsys):
+        """The house's guestroom pair was made through Dvara, so it is filed
+        under the person's Dvara name, not local: --from-watch finds it as
+        `edit` does, and the reading is theirs, on their road."""
+        store = store_module.Store(tmp_path / "prahari.sqlite3")
+        heat = hour_watch(store, owner="owner")
+        hour_watch(store, name="Cool the guestroom", when={"above": 70}, owner="owner")
+        del store
+        assert cli.main(["--state", str(tmp_path), "indriya", "add", "outside-temp",
+                         "--from-watch", heat.id, "--move", "--thing",
+                         "the outside temperature in °F", "--json"]) == 0
+        made = json.loads(capsys.readouterr().out)
+        assert made["owner"] == "owner" and len(made["moved"]) == 2
+        assert made["thing"] == "the outside temperature in °F"     # their words win
+
 class TestFreshOnAsking:
     def test_kept_value_young_enough_is_not_read_again(self, tmp_path):
         caller = FakeCaller('{"temperature": 61}')

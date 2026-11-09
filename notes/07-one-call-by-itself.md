@@ -170,6 +170,27 @@ with the call already agreed to. An earlier run of the same question
 took seven steps; only its end was kept, so what the extra steps were
 isn't known.
 
+## Found on the house's own watches
+
+The first real use, on the live guestroom pair, said *"error: no watch
+43dff0b2"*. Those two were made from a Dvara chat, so they're filed under
+the person's Dvara name, and `--from-watch` looked only among the
+watches filed as `local`. It now finds any watch, as `edit` does at the
+terminal. The indriya is made for the watch's own person, on its own
+road: through Dvara, as them, with Dvara's address passed along. A
+`--thing` given with it now wins over the watch's, so
+`--thing "the outside temperature in °F"` is what the reading says.
+
+Run first on a copy of the house's store:
+
+```
+$ prahari indriya add outside-temp --from-watch 43dff0b2 \
+    --thing "the outside temperature in °F" --move
+added indriya outside-temp: reads the outside temperature in °F every hour: …
+  moved 43dff0b2 (Guestroom heat when below 60°F) onto it: it no longer calls itself
+  moved 9a92df06 (Guestroom cool when above 70°F) onto it: it no longer calls itself
+```
+
 ## Not here
 
 * **Slowing back down.** An indriya sped up for a watch stays fast after

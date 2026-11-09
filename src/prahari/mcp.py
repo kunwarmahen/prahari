@@ -525,7 +525,9 @@ class Tools:
                 self.store, self._mine({"id": args["from_watch"]}),
                 name=str(args.get("name") or ""), share=str(args.get("share") or "mine"),
                 every=str(args.get("every") or ""), move=bool(args.get("move")),
-                home=self.home, created_via="agent")
+                home=self.home, created_via="agent",
+                dvara=self.dvara if self.runner == "dvara" else None,
+                thing=str(args.get("thing") or ""))
             said = f"Saved indriya {made.name}: {indriyas.sentence(made)}."
             if moved:
                 said += (" Moved onto it, no longer calling themselves: "
