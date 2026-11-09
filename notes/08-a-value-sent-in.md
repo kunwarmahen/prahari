@@ -149,8 +149,9 @@ sender said it has no value ('unavailable') …)"*. Silence past the
 deadline was tested on a clock moved by hand (`tests/test_pushed.py`);
 nobody waited an hour.
 
-Not run for real: a real Home Assistant. curl stands in for its
-`rest_command`, sending the same body to the same address.
+Then for real: the house's Home Assistant, set up by Sarathi's tutorial
+Step 8, sends `guestroom-temp` from its own `rest_command`, and the
+guestroom watches sense it.
 
 ## Not here
 
