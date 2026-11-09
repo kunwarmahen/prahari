@@ -34,7 +34,8 @@ ONE CALL IS ONE READING, BY ITSELF. A watch made on exactly the call an
 indriya already makes senses it instead (``reader_for``, used by
 ``watches.create``), and says so; one asked to look more often speeds up
 the person's own indriya to its pace -- never someone else's, whose
-reading is theirs to set, and never below the five-minute floor. Watches
+reading is theirs to set, and never below the five-minute floor (or the
+site's own, floors.py). Watches
 made before the indriya are moved onto it only on the person's word
 (``prahari edit ID --sense NAME``, or ``indriya add --from ID --move``),
 because a watch they agreed to is theirs.

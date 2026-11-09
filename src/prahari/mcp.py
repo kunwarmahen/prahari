@@ -278,8 +278,8 @@ TOOLS: list[dict] = [
      "description": (
          "One indriya's value now, how old it is, and its recent readings. When the "
          "kept value is too old for the question, give max_age: it is read again "
-         "first (the call the person already said yes to; not within 5 minutes of "
-         "the last reading)."),
+         "first (the call the person already said yes to; not within 5 minutes, or "
+         "the site's floor, of the last reading)."),
      "inputSchema": {"type": "object", "properties": {
          "name": {"type": "string", "description": "its name (or id)"},
          "max_age": {"type": "string", "description": (

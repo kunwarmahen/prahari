@@ -292,7 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             i.add_argument("--max-age", default=None, dest="max_age", metavar="AGE",
                            help="read it again first if its value is older than this "
-                                "(5m, 1h; not within 5 minutes of the last reading)")
+                                "(5m, 1h; not within 5 minutes of the last reading, or the "
+                                "site's floor)")
         i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
         i.add_argument("--json", action="store_true", dest="json_out")
     i = isub.add_parser("push", help="send a pushed indriya a value, here (as its "

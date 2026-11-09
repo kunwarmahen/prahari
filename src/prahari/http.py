@@ -13,7 +13,8 @@
     GET    /api/mailboxes                  the mail folders kept open (no passwords)
     GET    /api/indriyas                   every shared reading, with its value and age
     GET    /api/indriyas/NAME?max_age=5m   one, by name or id (read again first when
-                                           older than max_age; not within 5 minutes)
+                                           older than max_age; not within 5 minutes,
+                                           or the site's floor)
     GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
     POST   /api/indriyas/NAME/look         read it now (202 at once)
     POST   /api/indriyas/NAME/pause | /resume
