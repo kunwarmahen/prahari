@@ -37,9 +37,10 @@ class TestTheHints:
         hints = {t["name"]: t["annotations"]["readOnlyHint"] for t in mcp.TOOLS}
         assert {n for n, ro in hints.items() if ro} == {
             "preview_watch", "list_watches", "watch_looks", "inlet_address",
-            "list_indriyas", "read_indriya"}
+            "list_indriyas", "read_indriya", "indriya_templates"}
         assert hints["create_watch"] is False and hints["delete_watch"] is False
         assert hints["create_indriya"] is False and hints["delete_indriya"] is False
+        assert hints["install_indriya_template"] is False
 
 
 class TestTheTools:

@@ -1,0 +1,25 @@
+kind = "indriya"
+name = "outside-temp"
+title = "Outside temperature"
+about = "The temperature where you are, from Open-Meteo (no account, no key), every 15 minutes. Find your latitude and longitude on any map."
+version = "1"
+thing = "the outside temperature"
+every = "15m"
+
+[inputs.latitude]
+kind = "number"
+label = "Latitude (35.79)"
+
+[inputs.longitude]
+kind = "number"
+label = "Longitude (-78.78)"
+
+[inputs.unit]
+kind = "text"
+label = "fahrenheit or celsius"
+default = "fahrenheit"
+
+[check]
+tool = "web_fetch"
+args = { url = "https://api.open-meteo.com/v1/forecast?latitude={{inputs.latitude}}&longitude={{inputs.longitude}}&current=temperature_2m&temperature_unit={{inputs.unit}}" }
+pick = "json:current.temperature_2m"

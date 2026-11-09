@@ -115,6 +115,9 @@ class Watch:
     #: A routine (Vidhi) it starts when it fires, instead of a then-turn:
     #: its name, run as the watch's person. "" for none.
     routine: str = ""
+    #: This watch's own values for the routine's blanks ({"city": "Cary"}),
+    #: given to each run over the routine's installed ones.
+    routine_inputs: dict = field(default_factory=dict)
     runner: str = "direct"
     agent: str = ""                  # package dir (direct) or name (dvara)
     #: Tools the then-turn may use without asking.
@@ -258,7 +261,8 @@ class Look:
         return asdict(self)
 
 
-_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew", "stop"}
+_JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew", "stop",
+                 "routine_inputs"}
 _BOOL_COLUMNS = {"looked", "armed", "notified", "tls", "pushed"}
 
 _SCHEMA = """
@@ -394,7 +398,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("kept_at", "TEXT"), ("still_asked_at", "TEXT"),
                     ("zone", "TEXT NOT NULL DEFAULT ''"),
                     ("sense", "TEXT NOT NULL DEFAULT ''"),
-                    ("routine", "TEXT NOT NULL DEFAULT ''")),
+                    ("routine", "TEXT NOT NULL DEFAULT ''"),
+                    ("routine_inputs", "TEXT NOT NULL DEFAULT '{}'")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''"),
                    ("reading", "TEXT NOT NULL DEFAULT ''")),

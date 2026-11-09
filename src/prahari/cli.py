@@ -23,6 +23,9 @@
                                                 of watches and agents read it
     prahari add "Heat the guestroom" --sense outside-temp --when 'below 60'
                                                 a watch that decides on its readings
+    prahari indriya templates [--market]        readings ready to install, with blanks
+    prahari indriya install outside-temp --input latitude=35.79 --input longitude=-78.78
+                                                one, filled in: your own indriya
     prahari indriya list | get NAME | readings NAME | look NAME
     prahari indriya edit NAME --every 30m | pause NAME | resume NAME | rm NAME
     prahari hear WORD JSON [--for WHO]          try the inlet without the network
@@ -55,7 +58,7 @@ import sys
 import threading
 from pathlib import Path
 
-from prahari import __version__, indriyas, mailbox, mcp, recipe, version, watches
+from prahari import __version__, indriyas, mailbox, mcp, recipe, templates, version, watches
 from prahari.clock import Clock
 from prahari.dvara import Dvara, DvaraCaller, DvaraError, DvaraNotifier, DvaraRunner
 from prahari.http import (DEFAULT_PORT, Api, PrahariServer, inlet_token, public_inlet,
@@ -144,6 +147,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--routine", default="", metavar="NAME",
                    help="instead of --then: start this routine (Vidhi) when it fires, "
                         "with what it saw as the routine's input found")
+    p.add_argument("--input", action="append", default=[], metavar="NAME=VALUE",
+                   dest="inputs",
+                   help="with --routine: this watch's own value for one of the "
+                        "routine's blanks (repeatable): --input city=Cary")
     p.add_argument("--agent", default="", metavar="DIR|NAME",
                    help="the agent package that looks and works (Dvara road: its name)")
     p.add_argument("--runner", choices=("direct", "dvara"), default="direct")
@@ -167,6 +174,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--then", default=None)
     p.add_argument("--routine", default=None, metavar="NAME",
                    help="start this routine (Vidhi) when it fires ('' for none)")
+    p.add_argument("--input", action="append", default=None, metavar="NAME=VALUE",
+                   dest="inputs",
+                   help="change one of its routine's blanks (repeatable); NAME= "
+                        "drops it")
     p.add_argument("--keep", action="store_true", default=None,
                    help="keep it going: an ended watch looks again, and an open-ended "
                         "one stops asking for 30 days")
@@ -228,6 +239,25 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--share", choices=("mine", "house"), default="mine",
                    help="house: anyone's watches and agents may read its value (never "
                         "call as you)")
+    i.add_argument("--agent", default="", metavar="DIR|NAME")
+    i.add_argument("--runner", choices=("direct", "dvara"), default="direct")
+    i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR")
+    i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("templates", help="readings ready to install, with blanks")
+    i.add_argument("--market", action="store_true",
+                   help="also what the marketplace (Vidhi's VIDHI_MARKET) lists")
+    i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("install", help="a template, filled in: an indriya of your own")
+    i.add_argument("template", help="its name (prahari indriya templates)")
+    i.add_argument("--from-market", action="store_true", dest="from_market",
+                   help="fetch it from the marketplace, signed by a reviewer you trust "
+                        "(vidhi market trust)")
+    i.add_argument("--input", action="append", default=[], metavar="NAME=VALUE",
+                   dest="inputs", help="one of its blanks (repeatable)")
+    i.add_argument("--name", default="", help="call it this instead of the template's name")
+    i.add_argument("--every", default="", help="how often it reads, instead of the "
+                                               "template's")
+    i.add_argument("--share", choices=("mine", "house"), default="")
     i.add_argument("--agent", default="", metavar="DIR|NAME")
     i.add_argument("--runner", choices=("direct", "dvara"), default="direct")
     i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR")
@@ -445,7 +475,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
             pick=parts["pick"], when=parts["when"],
             every=parts["every"] or ("" if args.listen or sensed else "1h"),
             wake=parts["wake"] or "", renew=parts["renew"], then=args.then,
-            routine=args.routine,
+            routine=args.routine, routine_inputs=_pairs(args.inputs),
             asked=args.asked, thing=args.thing, starts=parts["starts"], ends=parts["ends"],
             stop=parts["stop"], owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, allow_tools=args.allow_tools, max_per_day=args.max_per_day,
@@ -573,6 +603,14 @@ def _dispatch(args, store: Store, state: Path) -> int:
         for key in ("name", "asked", "thing", "then", "max_per_day", "keep", "routine"):
             if getattr(args, key) is not None:
                 changes[key] = getattr(args, key)
+        if args.inputs is not None:
+            merged = dict(watch.routine_inputs or {})
+            for name, value in _pairs(args.inputs, drops=True).items():
+                if value == "":
+                    merged.pop(name, None)
+                else:
+                    merged[name] = value
+            changes["routine_inputs"] = merged
         if args.wake == "":
             changes["wake"], changes["renew"] = "", {}
         if args.sense:
@@ -706,6 +744,46 @@ def _indriya(args, store: Store, state: Path) -> int:
     house's (read-only, unless they are this person's)."""
     sub = args.indriya_command
     home = _home()
+    if sub == "templates":
+        found = [t.card() for t in templates.bundled()]
+        listed = templates.market() if args.market else []
+        if args.json_out:
+            print(json.dumps({"templates": found, "market": listed}))
+            return 0
+        for card in found:
+            print(f"{card['name']:<14} {card['title']}")
+            print(f"{'':<14} {'' if card['pushed'] else 'calls '}{card['calls']}")
+            if card["inputs"]:
+                print(f"{'':<14} fill: " + ", ".join(
+                    f"{i['name']} ({i['label']}"
+                    + (f", default {i['default']}" if "default" in i else "") + ")"
+                    for i in card["inputs"]))
+        for item in listed:
+            print(f"{item['name']:<14} {item['title']}  (marketplace, reviewed by "
+                  f"{item.get('reviewer')}: --from-market)")
+        print("install one: prahari indriya install NAME --input NAME=VALUE ...")
+        return 0
+    if sub == "install":
+        template = (templates.fetch(args.template) if args.from_market
+                    else templates.find(args.template))
+        made = templates.install(
+            store, template, _pairs(args.inputs), name=args.name, every=args.every,
+            share=args.share, owner=args.as_actor or watches.LOCAL_OWNER,
+            runner=args.runner, agent=args.agent,
+            dvara=_dvara() if args.runner == "dvara" else None)
+        if args.json_out:
+            print(json.dumps(indriyas.card(made, store)))
+            return 0
+        print(f"added indriya {made.name} from {template.name}"
+              + (f" (signed by {template.signed_by})" if template.signed_by else "")
+              + f": {indriyas.sentence(made)}")
+        if made.pushed:
+            print(f"send it values: POST <prahari>/inlet/indriya/{made.name} with "
+                  '{"value": 68.2}; the key: prahari inlet')
+        print(f"watches decide on it with: prahari add NAME --sense {made.name} --when ...")
+        if serving(state) is None:
+            print("prahari serve is not running: nothing is read until it is")
+        return 0
     if sub == "add" and args.from_watch:
         if args.check or args.check_args or args.pick is not None:
             raise watches.WatchError("--from-watch takes the call and pick from the watch; "
@@ -1053,6 +1131,18 @@ def _short(moment: str | None) -> str:
     return "-" if when is None else f"{when.astimezone():%a %-d %b %H:%M}"
 
 
+def _pairs(raw: list[str] | None, *, drops: bool = False) -> dict:
+    """``["city=Cary"]`` as ``{"city": "Cary"}``; ``city=`` kept as "" to
+    drop it, when ``drops``."""
+    out = {}
+    for pair in raw or []:
+        name, eq, value = pair.partition("=")
+        if not eq or not name.strip() or (not value.strip() and not drops):
+            raise watches.WatchError(f"--input is NAME=VALUE (city=Cary), not {pair!r}")
+        out[name.strip()] = value.strip()
+    return out
+
+
 def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
     print(f"{watch.id}  {watch.state:<7} {watch.name}")
     if watch.asked:
@@ -1060,7 +1150,8 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
     print(f"          {watches.sentence(watch, store)}"
           + (f"  (times on {watch.zone})" if watch.zone else ""))
     if watch.routine:
-        print(f"          then: starts the routine {watch.routine} (Vidhi)")
+        print(f"          then: starts the routine {watch.routine}"
+              f"{watches.inputs_words(watch)} (Vidhi)")
     else:
         print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
               if full or watch.then else "          then: tells you what it saw")

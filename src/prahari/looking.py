@@ -352,11 +352,14 @@ def start_routine(watch: Watch, found: str, *, command: list[str] | None = None
     """(started, run id or why not). STARTING IS ALL PRAHARI DOES: ``vidhi
     start`` adds a run, as the watch's own person, and Vidhi's server runs
     it and tells them. What the watch saw goes in as the routine's
-    ``found`` input, when it has one."""
+    ``found`` input, when it has one; the watch's own inputs go with it,
+    over the routine's installed ones."""
     try:
         argv = [*(command or find_vidhi()), "start", watch.routine,
                 f"--as={watch.owner}", f"--by=prahari:{watch.id}",
                 f"--found={found[:2000]}", "--json"]
+        for name, value in (watch.routine_inputs or {}).items():
+            argv.append(f"--input={name}={value}")
     except RunnerMissing as exc:
         return False, str(exc)
     try:

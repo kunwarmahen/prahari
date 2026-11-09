@@ -1,0 +1,22 @@
+kind = "indriya"
+name = "coin-price"
+title = "A coin's price"
+about = "A cryptocurrency's spot price from Coinbase's public prices (no account, no key), every 15 minutes."
+version = "1"
+thing = "the coin's price"
+every = "15m"
+
+[inputs.coin]
+kind = "text"
+label = "The coin (BTC, ETH)"
+default = "BTC"
+
+[inputs.currency]
+kind = "text"
+label = "In (USD, EUR, INR)"
+default = "USD"
+
+[check]
+tool = "web_fetch"
+args = { url = "https://api.coinbase.com/v2/prices/{{inputs.coin}}-{{inputs.currency}}/spot" }
+pick = "json:data.amount"

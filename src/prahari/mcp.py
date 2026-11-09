@@ -61,7 +61,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TextIO
 
-from prahari import __version__, indriyas, watches
+from prahari import __version__, indriyas, templates, watches
 from prahari.status import serving
 from prahari.store import Store
 
@@ -106,6 +106,10 @@ _ROUTINE = {"type": "string", "description": (
     "Instead of then: the name of one of the person's routines (Vidhi's "
     "list_routines) to start when it fires, as them, with what it saw as the "
     "routine's input found. The routine tells the person itself.")}
+_ROUTINE_INPUTS = {"type": "object", "description": (
+    "With routine: this watch's own values for the routine's blanks "
+    "({\"city\": \"Cary\"}), over the ones it was installed with -- one routine, "
+    "two watches, two cities. found is filled by the watch itself.")}
 _STARTS = {"type": "string", "description": (
     "When it starts looking, if not now: ISO 8601 with the person's offset "
     "(\"2026-10-31T07:00-04:00\"). \"Keep an eye on my flight tomorrow\" starts "
@@ -197,6 +201,7 @@ TOOLS: list[dict] = [
              "though an indriya already makes it (by default it senses that one)")},
          "wake": _WAKE, "renew": _RENEW,
          "then": {"type": "string"}, "routine": _ROUTINE,
+         "routine_inputs": _ROUTINE_INPUTS,
          "allow_tools": {"type": "array", "items": {"type": "string"}},
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200,
                          "description": "the most times it may fire in a day "
@@ -225,6 +230,7 @@ TOOLS: list[dict] = [
              "may go with it); what it remembered is kept when the indriya makes "
              "the same call")},
          "then": {"type": "string"}, "routine": _ROUTINE,
+         "routine_inputs": _ROUTINE_INPUTS,
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
          "required": ["id"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
@@ -298,6 +304,29 @@ TOOLS: list[dict] = [
              "script): no check; every is how often a value is expected at least. "
              "The answer has the address and key to give the person")}},
          "required": ["name"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False}},
+    {"name": "indriya_templates",
+     "description": (
+         "Readings ready to install, each with blanks to fill (the outside temperature "
+         "for a latitude and longitude, a coin's price): the ones that come with "
+         "Prahari, and with market: true the reviewed ones the marketplace lists. "
+         "Prefer one of these to writing a check by hand."),
+     "inputSchema": {"type": "object", "properties": {
+         "market": {"type": "boolean"}}},
+     "annotations": {"readOnlyHint": True}},
+    {"name": "install_indriya_template",
+     "description": (
+         "Make the person an indriya from a template, its blanks filled. Say first, in "
+         "words, what it will call and how often (indriya_templates shows it), and "
+         "install only on their yes. from_market: fetched from the marketplace, and "
+         "refused unless a reviewer the person trusts signed it."),
+     "inputSchema": {"type": "object", "properties": {
+         "template": {"type": "string"},
+         "inputs": {"type": "object", "description": "its blanks: {\"latitude\": 35.79}"},
+         "name": _INDRIYA_NAME, "every": {"type": "string"},
+         "share": {"type": "string", "enum": ["mine", "house"]},
+         "from_market": {"type": "boolean"}},
+         "required": ["template"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
     {"name": "update_indriya",
      "description": (
@@ -460,6 +489,7 @@ class Tools:
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
             then=str(args.get("then") or ""), routine=str(args.get("routine") or ""),
+            routine_inputs=args.get("routine_inputs") or None,
             owner=self.person, runner=self.runner,
             agent=self.agent, allow_tools=[str(g) for g in allow],
             max_per_day=int(args.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY),
@@ -477,7 +507,7 @@ class Tools:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
                                         "every", "then", "max_per_day", "wake", "renew",
                                         "starts", "ends", "stop", "keep", "sense",
-                                        "routine")
+                                        "routine", "routine_inputs")
                    if k in args}
         if changes.get("sense"):
             changes["home"] = self.home
@@ -516,6 +546,42 @@ class Tools:
             lines.append(f"{indriyas.reading_line(indriya)}{whose} -- "
                          f"{indriyas.sentence(indriya)}")
         return "\n".join(lines)
+
+    def _indriya_templates(self, args: dict) -> str:
+        lines = []
+        for template in templates.bundled():
+            card = template.card()
+            fill = ", ".join(i["name"] + (f" (default {i['default']})" if "default" in i
+                                          else "") for i in card["inputs"])
+            lines.append(f"{template.name}: {template.title} -- "
+                         f"{'' if template.pushed else 'calls '}{card['calls']}"
+                         + (f"; fill: {fill}" if fill else ""))
+        if args.get("market"):
+            for item in templates.market():
+                lines.append(f"{item['name']}: {item['title']} (marketplace, reviewed by "
+                             f"{item.get('reviewer')}; from_market: true)")
+        return "\n".join(lines) or "No templates."
+
+    def _install_indriya_template(self, args: dict) -> str:
+        name = str(args.get("template") or "")
+        template = templates.fetch(name) if args.get("from_market") else templates.find(name)
+        given = args.get("inputs") or {}
+        if not isinstance(given, dict):
+            raise ToolFailed("inputs is an object of the template's blanks")
+        made = templates.install(
+            self.store, template, given, name=str(args.get("name") or ""),
+            every=str(args.get("every") or ""), share=str(args.get("share") or ""),
+            owner=self.person, runner=self.runner, agent=self.agent,
+            dvara=self.dvara if self.runner == "dvara" else None, created_via="agent")
+        said = (f"Saved indriya {made.name} from the template {template.name}"
+                + (f", signed by {template.signed_by}" if template.signed_by else "")
+                + f": {indriyas.sentence(made)}. Watches decide on it with sense: "
+                f"\"{made.name}\".")
+        if made.pushed:
+            url, public, key, _ = self._addresses()
+            said += (f" Its sender POSTs {{\"value\": ...}} to {url}inlet/indriya/"
+                     f"{made.name}?key={key} (give the person that address).")
+        return said
 
     def _read_indriya(self, args: dict) -> str:
         indriya = self._indriya(args)

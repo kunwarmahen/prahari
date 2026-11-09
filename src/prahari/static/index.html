@@ -194,7 +194,22 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
   </form>
   <div id="watches"><p class="empty">Loading…</p></div>
 
-  <div class="bar"><h2>Indriyas</h2><span class="empty">readings kept up to date, shared by watches and agents</span></div>
+  <div class="bar"><h2>Indriyas</h2><span class="empty">readings kept up to date, shared by watches and agents</span>
+    <span class="grow"></span><button class="btn" type="button" id="tpl-open">From a template</button></div>
+  <form class="new hidden" id="tpl" autocomplete="off">
+    <p class="hint">A reading somebody already wrote, with blanks: fill them and it is yours,
+      read with your own accounts. <span id="tpl-market-note"></span></p>
+    <label>Template <select name="template" id="tpl-pick"></select></label>
+    <div class="says" id="tpl-says"></div>
+    <div id="tpl-inputs"></div>
+    <div class="two">
+      <label>Call it (empty: the template's name) <input name="name" placeholder=""></label>
+      <label>Every (empty: the template's) <input name="every" placeholder=""></label>
+    </div>
+    <div><button class="btn main" type="submit">Install</button>
+      <button class="btn link" type="button" id="tpl-market">Show the marketplace's too</button>
+      <button class="btn link" type="button" id="tpl-close">Cancel</button></div>
+  </form>
   <div id="indriyas"><p class="empty">Loading…</p></div>
 
   <div class="bar"><h2>The inlet</h2></div>
@@ -423,6 +438,48 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       setTimeout(() => refresh().catch(() => {}), btn.dataset.act === "look" ? 3000 : 0);
     } catch (err) { fail(err); }
   });
+
+  // Templates: a reading with blanks (the ones Prahari brings, and with
+  // "Show the marketplace's too", the reviewed ones VIDHI_MARKET lists).
+  let tpls = [];
+  async function loadTemplates(market) {
+    const said = await api("GET", "indriya-templates" + (market ? "?market=1" : ""));
+    tpls = said.templates.map((t) => ({ ...t, from_market: false }))
+      .concat(said.market.map((m) => ({ name: m.name, title: m.title, about: m.about,
+        calls: (m.touches || []).join("; "), inputs: [], from_market: true,
+        reviewer: m.reviewer })));
+    $("tpl-pick").innerHTML = tpls.map((t, n) => `<option value="${n}">${esc(t.title)} (${esc(t.name)})${t.from_market ? " · marketplace" : ""}</option>`).join("");
+    $("tpl-market-note").textContent = market ? (said.market.length
+      ? "Marketplace ones are installed only if a reviewer you trust signed them."
+      : "The marketplace lists none.") : "";
+    showTemplate();
+  }
+  function showTemplate() {
+    const t = tpls[Number($("tpl-pick").value) || 0];
+    if (!t) return;
+    $("tpl-says").innerHTML = `${esc(t.about || "")}<br><b>Calls:</b> ${esc(t.calls || "")}` +
+      (t.from_market ? `<br>Reviewed by ${esc(t.reviewer || "?")}; its blanks are asked once it is fetched (or use <code>prahari indriya install ${esc(t.name)} --from-market --input NAME=VALUE</code>).` : "");
+    $("tpl-inputs").innerHTML = (t.inputs || []).map((i) => `<label>${esc(i.label || i.name)}
+      <input data-input="${esc(i.name)}" ${i.kind === "number" ? 'inputmode="decimal"' : ""} value="${esc(i.default ?? "")}"></label>`).join("");
+  }
+  $("tpl-pick").addEventListener("change", showTemplate);
+  $("tpl-open").onclick = () => { $("tpl").classList.remove("hidden"); loadTemplates(false).catch(fail); };
+  $("tpl-close").onclick = () => $("tpl").classList.add("hidden");
+  $("tpl-market").onclick = () => loadTemplates(true).catch(fail);
+  $("tpl").onsubmit = async (e) => {
+    e.preventDefault();
+    const t = tpls[Number($("tpl-pick").value) || 0];
+    const inputs = Object.fromEntries([...$("tpl-inputs").querySelectorAll("[data-input]")]
+      .map((el) => [el.dataset.input, el.value.trim()]));
+    const form = new FormData($("tpl"));
+    try {
+      await api("POST", `indriya-templates/${encodeURIComponent(t.name)}/install`, {
+        inputs, name: form.get("name").trim(), every: form.get("every").trim(),
+        from_market: t.from_market });
+      $("tpl").classList.add("hidden");
+      await refresh();
+    } catch (err) { fail(err); }
+  };
 
   async function inlet() {
     const s = await api("GET", "inlet");

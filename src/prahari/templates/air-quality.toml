@@ -1,0 +1,20 @@
+kind = "indriya"
+name = "air-quality"
+title = "Air quality (US AQI)"
+about = "The US air quality index where you are, from Open-Meteo (no account, no key), every hour. Above 100 is unhealthy for sensitive groups."
+version = "1"
+thing = "the air quality index"
+every = "1h"
+
+[inputs.latitude]
+kind = "number"
+label = "Latitude (35.79)"
+
+[inputs.longitude]
+kind = "number"
+label = "Longitude (-78.78)"
+
+[check]
+tool = "web_fetch"
+args = { url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={{inputs.latitude}}&longitude={{inputs.longitude}}&current=us_aqi" }
+pick = "json:current.us_aqi"

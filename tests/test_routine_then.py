@@ -73,3 +73,39 @@ def test_vidhi_start_is_asked_as_the_watchs_person(tmp_path):
     assert ok and said == "ab12cd34"
     assert json.loads((tmp_path / "vidhi.py.log").read_text()) == [
         "start", "cold-night", "--as=asha", "--by=prahari:w1", "--found=38.5", "--json"]
+
+
+# A watch's own inputs. BIAS: one routine for two places meant two installs,
+# or a watch that quietly ran with the installed place.
+
+
+def test_a_watchs_own_inputs_go_with_the_start(tmp_path):
+    script = tmp_path / "vidhi.py"
+    script.write_text("import json, sys\nopen(sys.argv[0] + '.log', 'w').write("
+                      "json.dumps(sys.argv[1:]))\nprint(json.dumps({'id': 'ab12cd34'}))\n")
+    watch = watches.Watch(id="w1", owner="asha", name="x", routine="cold-night",
+                          routine_inputs={"room": "guestroom"})
+    looking.start_routine(watch, "38.5", command=[sys.executable, str(script)])
+    argv = json.loads((tmp_path / "vidhi.py.log").read_text())
+    assert argv[-1] == "--input=room=guestroom" and "--found=38.5" in argv
+
+
+def test_inputs_are_kept_mended_and_dropped_with_the_routine(tmp_path):
+    store, _ = make_clock(tmp_path, FakeCaller("1"))
+    watch = _watch(store, routine="cold-night", routine_inputs={"room": "guestroom"})
+    assert store.get(watch.id).routine_inputs == {"room": "guestroom"}
+    assert "cold-night (room = guestroom)" in watches.card(watch)["does"]
+    watch = watches.update(store, watch.id, routine_inputs={"room": "porch"})
+    assert watch.routine_inputs == {"room": "porch"}
+    watch = watches.update(store, watch.id, then="Tell me")
+    assert watch.routine == "" and watch.routine_inputs == {}
+
+
+def test_inputs_need_a_routine_and_found_is_the_watchs_own(tmp_path):
+    store, _ = make_clock(tmp_path, FakeCaller("1"))
+    with pytest.raises(WatchError, match="give the watch a routine too"):
+        _watch(store, routine_inputs={"room": "porch"})
+    with pytest.raises(WatchError, match="fills that one itself"):
+        _watch(store, routine="cold-night", routine_inputs={"found": "x"})
+    with pytest.raises(WatchError, match="one lowercase word"):
+        _watch(store, routine="cold-night", routine_inputs={"The Room": "x"})

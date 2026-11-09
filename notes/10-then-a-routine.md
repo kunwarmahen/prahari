@@ -69,5 +69,6 @@ it's the value now.
 
 ## Not here
 
-* **Inputs from the watch beyond `found`.** One value goes in; a routine
-  that wants more reads it itself (a `read` step on the same indriya).
+* ~~**Inputs from the watch beyond `found`.**~~ `--input room=porch` (or
+  `routine_inputs`) is kept on the watch and given to each run over the
+  routine's installed values; `found` stays the watch's own.

@@ -302,6 +302,28 @@ never lets them call anything as you, or change it. It starts as
 that person sees them, which is how Dvara's `/indriyas` asks, so a
 private reading never reaches someone else's list.
 
+**Or from a template.** A reading somebody already wrote, with blanks:
+fill them and it is yours, read with your accounts on your road
+([notes/11](notes/11-a-reading-from-a-template.md)). Four come with
+Prahari (the outside temperature and the air quality from Open-Meteo, a
+coin's price from Coinbase, a Home Assistant sensor sent in); a
+marketplace (Vidhi's, `VIDHI_MARKET`) lists more, each reviewed and
+signed, installed only if a reviewer you trust signed it:
+
+```bash
+prahari indriya templates [--market]
+prahari indriya install outside-temp --input latitude=35.79 --input longitude=-78.78
+#   added indriya outside-temp from outside-temp: reads the outside temperature every
+#   15 minutes: looks at api.open-meteo.com/v1/forecast (with web_fetch)
+prahari indriya install coin-price --name eth --input coin=ETH --every 30m
+prahari indriya install eth-price --from-market     # signed, checked against your trust list
+```
+
+A blank in an address is one value: `Cary&key=x` arrives as
+`Cary%26key%3Dx` and can't add a parameter. The page's **From a
+template** button and the agent's `indriya_templates` and
+`install_indriya_template` do the same.
+
 **One call stays one call, by itself.** A new watch on exactly the call
 an indriya already makes senses it instead, and says so; one that asked
 to look more often speeds up your own indriya to its pace (never someone
@@ -753,7 +775,10 @@ prahari add "Porch is cold" --sense porch-temp --when 'below 60' --routine coat-
 ```
 
 When it fires, Prahari runs `vidhi start coat-check --as <the watch's
-person> --by prahari:<id> --found 58`. What it saw goes in as the
+person> --by prahari:<id> --found 58`. `--input room=porch` (repeatable;
+`routine_inputs` from the agent) gives this watch its own values for the
+routine's blanks, so one routine serves the porch and the guestroom
+(`prahari edit ID --input room=` drops one). What it saw goes in as the
 routine's `found` input when it has one: the value itself, or the new
 items for a `new` watch. The routine tells the person what it did, so
 the watch sends nothing of its own; one that didn't start is told, with
@@ -829,6 +854,10 @@ src/prahari/
 ├── watches.py   make, mend, pause, find, a cap per person, one watch per
 │                call and pick; preview, which looks once with nothing
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
+├── templates.py a reading with blanks: the ones that come with Prahari
+│                (templates/), or a marketplace's through `vidhi market get`;
+│                filled in, a blank in an address quoted
+│                ([notes/11](notes/11-a-reading-from-a-template.md))
 ├── indriyas.py  shared readings: make, mend, find (own first, then the
 │                house's), never removed while sensed; their words and age
 │                ([notes/06](notes/06-one-reading-many-watches.md)); made from
@@ -874,7 +903,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 266 tests. The API is not stable.
+tools work, and are covered by 279 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
@@ -883,7 +912,9 @@ an indriya on the outside temperature read once for three watches, and
 read again through the page's API and `prahari mcp`
 ([notes/06](notes/06-one-reading-many-watches.md)); the guestroom pair
 moved onto it without telling you twice, and a local model asking for a
-fresh value ([notes/07](notes/07-one-call-by-itself.md)).
+fresh value ([notes/07](notes/07-one-call-by-itself.md)); a reading
+installed from the outside-temperature template, and one from a
+marketplace, signed, read for real ([notes/11](notes/11-a-reading-from-a-template.md)).
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a

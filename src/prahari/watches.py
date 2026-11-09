@@ -211,7 +211,7 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None, sense: str = "", home: set[str] | None = None,
            look_itself: bool = False, notes: list[str] | None = None,
-           routine: str = "") -> Watch:
+           routine: str = "", routine_inputs=None) -> Watch:
     """A new watch. ``notes`` gathers what Prahari decided on the person's
     behalf, in words, for the caller to say: a watch on a call an indriya
     already makes senses it instead (``look_itself`` says no)."""
@@ -223,7 +223,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
                           stop=stop, zone=zone, owner=owner, runner=runner, agent=agent,
                           allow_tools=allow_tools, wait=wait, time_limit=time_limit,
                           max_per_day=max_per_day, created_via=created_via, dvara=dvara,
-                          sense=reader.id, home=home, notes=notes, routine=routine)
+                          sense=reader.id, home=home, notes=notes, routine=routine,
+                          routine_inputs=routine_inputs)
     sensed = None
     if sense:
         from prahari import indriyas
@@ -243,6 +244,7 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
             f"{sentence(twin, store)}. Mend that one (its test, how often) instead of making "
             "a second; ask the person first")
     routine = _routine(routine, then)
+    given_inputs = _routine_inputs(routine_inputs, routine)
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
     if runner == "dvara":
@@ -267,7 +269,7 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
     if len(store.watches(owner=owner)) >= max_watches():
         raise WatchError(f"{owner} has {max_watches()} watches already; delete one first")
     watch = Watch(id="", owner=owner, then=(then or "").strip(), routine=routine,
-                  runner=runner,
+                  routine_inputs=given_inputs, runner=runner,
                   agent=agent, allow_tools=grants, wait=int(wait),
                   time_limit=int(time_limit), max_per_day=int(max_per_day),
                   created_via=created_via, **parts)
@@ -405,7 +407,7 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
                "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
-               "keep", "sense", "home", "routine"}
+               "keep", "sense", "home", "routine", "routine_inputs"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
@@ -474,6 +476,11 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         fields["routine"] = _routine(
             str(given.get("routine", "" if fields.get("then") else watch.routine)),
             fields.get("then", watch.then))
+        if not fields["routine"]:
+            fields["routine_inputs"] = {}
+    if "routine_inputs" in given:
+        fields["routine_inputs"] = _routine_inputs(given["routine_inputs"],
+                                                   fields.get("routine", watch.routine))
     if "allow_tools" in given:
         grants = given["allow_tools"]
         if not isinstance(grants, list):
@@ -633,14 +640,51 @@ def _routine(routine: str, then: str) -> str:
     return routine
 
 
+#: A routine's blank, as Vidhi names one; how many one watch fills, how long.
+INPUT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+MAX_INPUTS, MAX_INPUT = 12, 500
+
+
+def _routine_inputs(raw, routine: str) -> dict:
+    """A watch's own values for its routine's blanks, checked for shape:
+    ``{"city": "Cary"}``. Whether the routine HAS that blank is Vidhi's to
+    say when a run starts (and the watch's look says so, if it hasn't)."""
+    if not raw:
+        return {}
+    if not routine:
+        raise WatchError("inputs are a routine's blanks: give the watch a routine too")
+    if not isinstance(raw, dict):
+        raise WatchError('routine_inputs is a table: {"city": "Cary"}')
+    if len(raw) > MAX_INPUTS:
+        raise WatchError(f"{MAX_INPUTS} inputs at the most")
+    out = {}
+    for name, value in raw.items():
+        if name == "found":
+            raise WatchError("found is what the watch saw: it fills that one itself")
+        if not INPUT_RE.match(str(name)):
+            raise WatchError(f"input {name!r}: one lowercase word, as the routine names it")
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise WatchError(f"input {name}: a word or a number")
+        if len(str(value)) > MAX_INPUT:
+            raise WatchError(f"input {name}: {MAX_INPUT} characters at the most")
+        out[str(name)] = value
+    return out
+
+
+def inputs_words(watch: Watch) -> str:
+    """" (city = Cary)" for a watch that fills its routine's blanks."""
+    given = ", ".join(f"{k} = {v}" for k, v in (watch.routine_inputs or {}).items())
+    return f" ({given})" if given else ""
+
+
 def card(watch: Watch, store: Store | None = None) -> dict:
     """A watch as a page or a program reads it: itself, in words, and its
     last look."""
     data = watch.as_dict()
     data["sentence"] = sentence(watch, store)
     data["does"] = (f"Then it asks the agent: {watch.then}" if watch.then
-                    else f"Then it starts the routine {watch.routine} (Vidhi), with "
-                         "what it saw as {{inputs.found}}" if watch.routine
+                    else f"Then it starts the routine {watch.routine}{inputs_words(watch)} "
+                         "(Vidhi), with what it saw as {{inputs.found}}" if watch.routine
                     else "You get a line saying what it saw; no model is asked")
     if store is not None:
         last = store.looks(watch.id, limit=1)

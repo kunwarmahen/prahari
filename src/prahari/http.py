@@ -17,6 +17,9 @@
     GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
     POST   /api/indriyas/NAME/look         read it now (202 at once)
     POST   /api/indriyas/NAME/pause | /resume
+    GET    /api/indriya-templates?market=1 readings ready to install, with blanks
+    POST   /api/indriya-templates/NAME/install   {inputs, name, every, share,
+                                                  from_market, as}: an indriya
 
     POST   /inlet/WORD                     something to hear (an inlet key);
                                           202 at once, with how many watches heard
@@ -87,7 +90,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from prahari import indriyas, watches
+from prahari import indriyas, templates, watches
 from prahari.clock import Clock
 from prahari.status import report
 from prahari.store import Store
@@ -247,6 +250,22 @@ class Api:
                 except RuntimeError as exc:
                     raise ApiError(409, str(exc)) from None
                 return 202, {"looking": watch.id}
+        if parts == ["indriya-templates"] and method == "GET":
+            market = query.get("market", [""])[0] in ("1", "true", "yes")
+            return 200, {"templates": [t.card() for t in templates.bundled()],
+                         "market": templates.market() if market else []}
+        if len(parts) == 3 and parts[0] == "indriya-templates" and parts[2] == "install" \
+                and method == "POST":
+            template = (templates.fetch(parts[1]) if body.get("from_market")
+                        else templates.find(parts[1]))
+            given = body.get("inputs") or {}
+            if not isinstance(given, dict):
+                raise ApiError(400, "inputs is an object of the template's blanks")
+            made = templates.install(
+                self.store, template, given, name=str(body.get("name") or ""),
+                every=str(body.get("every") or ""), share=str(body.get("share") or ""),
+                owner=str(body.get("as") or watches.LOCAL_OWNER), created_via="page")
+            return 201, indriyas.card(made, self.store)
         if parts == ["indriyas"] and method == "GET":
             return 200, {"indriyas": [indriyas.card(i, self.store)
                                       for i in self.store.indriyas()]}

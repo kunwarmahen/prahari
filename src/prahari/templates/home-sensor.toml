@@ -1,0 +1,8 @@
+kind = "indriya"
+name = "home-sensor"
+title = "A Home Assistant sensor, sent in"
+about = "No call: Home Assistant sends the value itself whenever it changes (a rest_command and an automation; the install tells you the address and key). Name it after the sensor: guestroom-temp."
+version = "1"
+thing = "the sensor's value"
+every = "1h"
+pushed = true
