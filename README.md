@@ -716,6 +716,8 @@ is on it, and every day and time their watches say is said on it.
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 | `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again; `max_age` reads it again first when it's older (not within 5 minutes) |
 | `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check. `from_watch` takes a watch's call, pick and pace; `move` moves the person's watches on that call onto it, on their word. `pushed: true` makes one whose value is sent in, and its answer has the person's address and key |
+| `indriya_templates` | readings ready to install, each with what it calls and its blanks: the ones that come with Prahari, and with `market: true` the marketplace's ([notes/11](notes/11-a-reading-from-a-template.md)) |
+| `install_indriya_template` | makes the person's own indriya from one, its blanks filled; `from_market` fetches it and is refused unless a reviewer they trust signed it |
 | `update_indriya`, `delete_indriya` | mend or remove one of this person's own (removing is refused while a watch senses it) |
 
 `create_watch` and `preview_watch` take `sense` (an indriya's name) in

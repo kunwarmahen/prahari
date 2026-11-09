@@ -22,6 +22,10 @@ indriyas (shared readings):
     read_indriya      read    one reading now, and its recent history
     create_indriya    write   keep a reading up to date (one call, a pick, how
                               often), for any number of watches to sense
+    indriya_templates read    readings ready to install, with blanks (Prahari's
+                              own, and a marketplace's)
+    install_indriya_template
+                      write   one, its blanks filled: the person's own indriya
     update_indriya    write   mend one: its call, pick, how often, who sees it
     delete_indriya    write   (refused while a watch senses it)
 
@@ -30,7 +34,7 @@ finds a fresh indriya answers from it, with no call out at all; and a
 watch on the same number as an indriya SENSES it (``sense``) instead of
 looking again.
 
-THE AGENT WRITES THE RECIPE; THE PERSON ACCEPTS IT. The four reads say
+THE AGENT WRITES THE RECIPE; THE PERSON ACCEPTS IT. The reads say
 ``readOnlyHint: true`` and the rest do not, so a harness that honours the
 hint (Yantra does) puts every create and change in front of the person.
 ``preview_watch`` comes first: it LOOKS ONCE, with a tool that only
