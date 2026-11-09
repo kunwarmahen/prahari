@@ -189,9 +189,8 @@ trust them too. Naming the whole server (`prahari`) covers them already.
   person's word ([notes/07](07-one-call-by-itself.md)).
 * ~~**A read that asks for fresh.**~~ `max_age`, never within 5 minutes
   of the last reading ([notes/07](07-one-call-by-itself.md#fresh-on-asking)).
-* **Values pushed in.** A Home Assistant thermometer posting its value
-  to the inlet, instead of being looked at, belongs here and isn't here
-  yet.
+* ~~**Values pushed in.**~~ A pushed indriya: Home Assistant sends the
+  value to the inlet ([notes/08](08-a-value-sent-in.md)).
 * ~~**Pausing an indriya nobody senses.**~~ Thirty days unused, it pauses
   and says so ([notes/07](07-one-call-by-itself.md#unused-it-stops)).
 * **Code.** An indriya, like a recipe, is a call, a pick and a time. A

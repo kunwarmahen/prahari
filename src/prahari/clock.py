@@ -90,6 +90,9 @@ STILL_AFTER = timedelta(days=30)
 
 #: Broken or failed looks in a row before a watch pauses itself.
 MAX_TROUBLE = 3
+#: What a sender says when it has no value (Home Assistant: unavailable,
+#: unknown): a pushed reading that broke, not a value.
+NO_VALUE = ("", "unavailable", "unknown", "none", "null", "nan")
 #: Looks in a row a site turned away before the watch pauses: the site,
 #: not the recipe, said no, so it gets a few more days than a broken pick.
 MAX_TURNED_AWAY = 5
@@ -212,6 +215,10 @@ class Clock:
             if self._unused(indriya, now):
                 continue
             self._claim_reading(indriya, now)
+            if indriya.pushed:
+                # nothing to call: its deadline passed with nothing sent in
+                self._silent(indriya)
+                continue
             started.append(self._submit_reading(indriya, "clock"))
         return started
 
@@ -290,6 +297,9 @@ class Clock:
         indriya = self.store.get_indriya(indriya_id)
         if indriya is None:
             raise KeyError(indriya_id)
+        if indriya.pushed:
+            raise RuntimeError(f"{indriya.name} is pushed in: it has nothing to read, and "
+                               f"waits for its sender (POST /inlet/indriya/{indriya.name})")
         if self._busy(indriya.id):
             raise RuntimeError(f"{indriya.name} is reading already")
         self._claim_reading(indriya, self.now())
@@ -311,6 +321,67 @@ class Clock:
                                      "watch senses it and nobody asked for its value")
         return True
 
+    def submit_push(self, indriya: Indriya, text: str) -> Future:
+        """The inlet's door for a value: answered at once, decided behind
+        (a watch that fires may start a turn; Home Assistant should not
+        wait on it)."""
+        return self._pool.submit(self.push, indriya, text)
+
+    def push(self, indriya: Indriya, text: str) -> Reading:
+        """A value sent in for a pushed indriya: picked, kept, and handed to
+        its watches, as a reading the clock took would be. Its deadline
+        starts again from now."""
+        now = self.now()
+        reading = Reading(id="", indriya=indriya.id, at=iso(now), said=text[:SAID_KEPT])
+        picked = recipe.apply(indriya.pick, text)
+        if picked.found and picked.shown().strip().lower() in NO_VALUE:
+            # A SENDER THAT SAYS IT DOESN'T KNOW. Home Assistant sends
+            # "unavailable" when a sensor drops off the network: that is
+            # not the guestroom's temperature, it is the sender failing.
+            reading.outcome = "broken"
+            reading.why = (f"The sender said it has no value ({picked.shown()!r}): the "
+                           "sensor behind it may be off or out of reach")
+            reading.detail = f"sent {picked.shown()!r}"
+        elif picked.found:
+            reading.value, reading.stored = picked.shown(), picked.stored()
+            reading.why = f"Pushed in: {reading.value}"
+        else:
+            reading.outcome = "broken"
+            reading.why = ("Something was pushed in, but the pick found nothing in it; "
+                           "the sender may be sending something else now")
+            reading.detail = "pick found nothing; it said: " + " ".join(text.split())[:SAID_SHOWN]
+        self.store.add_reading(reading)
+        self.store.update_indriya(indriya.id, next_at=iso(now + recipe.every(indriya.every)))
+        if reading.outcome == "read":
+            self.store.update_indriya(indriya.id, value=reading.value, stored=reading.stored,
+                                      read_at=reading.at, trouble=0)
+        else:
+            self._count(indriya, reading)
+        self._pass_down(indriya, reading, text)
+        return reading
+
+    def _silent(self, indriya: Indriya) -> None:
+        """A PUSHED READING THAT STOPS IS SAID. Nothing came in within its
+        every: a Home Assistant automation that broke looks, to every watch
+        on it, exactly like a temperature that never crosses the line. So
+        it is a failed reading, said on each watch and counted once."""
+        reading = Reading(
+            id="", indriya=indriya.id, at=iso(self.now()), outcome="failed",
+            detail=f"nothing pushed in for {_for(recipe.every(indriya.every))}",
+            why=("Nothing was sent in within its every: the sender (a Home Assistant "
+                 "automation, a script) may have stopped"))
+        self.store.add_reading(reading)
+        self._count(indriya, reading)
+        self._pass_down(indriya, reading, "")
+
+    def _count(self, indriya: Indriya, reading: Reading) -> None:
+        current = self.store.get_indriya(indriya.id) or indriya
+        count = current.trouble + 1
+        self.store.update_indriya(indriya.id, trouble=count)
+        if count >= MAX_TROUBLE:
+            self._pause_indriya(current, f"{reading.outcome} {count} times in a row; "
+                                         f"last: {reading.detail}")
+
     def _claim_reading(self, indriya: Indriya, now: datetime) -> None:
         self.store.update_indriya(indriya.id, next_at=iso(now + recipe.every(indriya.every)))
 
@@ -331,12 +402,7 @@ class Clock:
             elif reading.outcome == "needs_person":
                 self._pause_indriya(indriya, f"needs you: {reading.detail}")
             elif reading.outcome in ("failed", "broken"):
-                current = self.store.get_indriya(indriya.id) or indriya
-                count = current.trouble + 1
-                self.store.update_indriya(indriya.id, trouble=count)
-                if count >= MAX_TROUBLE:
-                    self._pause_indriya(current, f"{reading.outcome} {count} times in a "
-                                                 f"row; last: {reading.detail}")
+                self._count(indriya, reading)
             if self.on_reading is not None:
                 try:
                     self.on_reading(indriya, reading)
@@ -363,8 +429,10 @@ class Clock:
                 continue
             look.outcome = "failed"
             look.detail = reading.detail
-            look.why = (f"Its indriya {indriya.name} could not read ({reading.outcome}), so "
-                        "nothing was decided; the indriya keeps count, not this watch")
+            look.why = ((f"Its indriya {indriya.name} got no value from its sender "
+                         f"({reading.why.rstrip('.')})" if indriya.pushed else
+                         f"Its indriya {indriya.name} could not read ({reading.outcome})")
+                        + ", so nothing was decided; the indriya keeps count, not this watch")
             look.said = reading.said
             self._done(watch, look)
 
@@ -808,6 +876,12 @@ class Clock:
                 self.on_record(watch, look)
             except Exception:
                 pass
+
+
+def _for(step: timedelta) -> str:
+    """"for an hour", "for 2 hours": a span as a sentence says it."""
+    words = recipe.duration_words(step)
+    return words if words[0].isdigit() else ("an " if words == "hour" else "a ") + words
 
 
 def take(caller: Caller, indriya: Indriya, now: datetime) -> tuple[Reading, str]:

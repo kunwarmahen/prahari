@@ -211,5 +211,5 @@ call under that name is still refused.
 * **Moving a watch back off a reading.** A watch that senses can't be
   given its own call again. Remove it and make it anew with
   `--look-itself`.
-* **Values pushed in** (a Home Assistant thermometer posting to the
-  inlet) still belong here and still aren't here.
+* ~~**Values pushed in**~~ A pushed indriya
+  ([notes/08](08-a-value-sent-in.md)).

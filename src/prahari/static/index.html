@@ -356,16 +356,17 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
           ${i.state === "paused" ? `<span class="tag paused">paused</span>` : ""}</div>
         <div class="says">${esc(i.sentence)}.</div>
         ${i.paused_because ? `<div class="paused-why">${esc(i.paused_because)}</div>` : ""}
-        <div class="last">${i.read_at ? `read ${esc(i.age)}` : "not read yet"}${i.state === "active" && i.next_at ? ` · next ${when(i.next_at)}` : ""}
+        <div class="last">${i.read_at ? `read ${esc(i.age)}` : "not read yet"}${i.state === "active" && i.next_at ? (i.pushed ? ` · expected by ${when(i.next_at)}` : ` · next ${when(i.next_at)}`) : ""}
           ${i.last_reading && i.last_reading.outcome !== "read" ? ` · last: <span class="out ${esc(i.last_reading.outcome)}">${esc(words[i.last_reading.outcome] || i.last_reading.outcome)}</span> ${esc(i.last_reading.why)}` : ""}</div>
         <div class="last">${i.sensed_by.length ? "sensed by " + i.sensed_by.map((w) => esc(w.name)).join(", ") : "no watch senses it yet"}</div>
-        <div class="acts"><button class="btn link" data-act="look">Read now</button>
+        <div class="acts">${i.pushed ? "" : `<button class="btn link" data-act="look">Read now</button>`}
           <button class="btn link" data-act="${i.state === "paused" ? "resume" : "pause"}">${i.state === "paused" ? "Resume" : "Pause"}</button></div>
       </div>`).join("")
       : `<p class="hint">An indriya reads one number (or line) for everyone: the outside
         temperature, a price. Watches <i>sense</i> it instead of each calling out, and your
         agent answers from it. Ask your agent to keep one, or:
-        <code>prahari indriya add outside-temp --check TOOL --args JSON --pick number --every 15m</code>.</p>`;
+        <code>prahari indriya add outside-temp --check TOOL --args JSON --pick number --every 15m</code>,
+        or one Home Assistant sends in: <code>prahari indriya add guestroom-temp --pushed</code>.</p>`;
   }
   $("indriyas").addEventListener("click", async (e) => {
     const btn = e.target.closest("button[data-act]"); if (!btn) return;

@@ -205,6 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the tool it reads with (it must read, or be this exact call)")
     i.add_argument("--from-watch", metavar="ID", default=None, dest="from_watch",
                    help="take the call, pick, thing and how often from this watch")
+    i.add_argument("--pushed", action="store_true",
+                   help="no call: its value is sent in (POST /inlet/indriya/NAME, "
+                        "Home Assistant), and --every is how often one is expected")
     i.add_argument("--move", action="store_true",
                    help="with --from-watch: move every watch of yours on that same call "
                         "onto it (otherwise they are listed)")
@@ -250,6 +253,12 @@ def build_parser() -> argparse.ArgumentParser:
                                 "(5m, 1h; not within 5 minutes of the last reading)")
         i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
         i.add_argument("--json", action="store_true", dest="json_out")
+    i = isub.add_parser("push", help="send a pushed indriya a value, here (as its "
+                                     "sender would), and wait for its watches")
+    i.add_argument("name")
+    i.add_argument("value", help="a number or words, or a JSON object")
+    i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR")
+    i.add_argument("--json", action="store_true", dest="json_out")
     for name, text in (("look", "read once, now, and wait"),
                        ("pause", "stop reading, keep it"), ("resume", "read again, from now"),
                        ("rm", "remove it and its readings (not while a watch senses it)")):
@@ -719,9 +728,57 @@ def _indriya(args, store: Store, state: Path) -> int:
         if serving(state) is None:
             print("prahari serve is not running: nothing is read until it is")
         return 0
+    if sub == "add" and args.pushed:
+        if args.check or args.check_args:
+            raise watches.WatchError("a pushed indriya makes no call: leave out --check "
+                                     "and --args")
+        made = indriyas.create(
+            store, name=args.name, pushed=True,
+            pick=recipe.pick_from_text(args.pick) if args.pick is not None else None,
+            every=args.every or "", thing=args.thing, share=args.share,
+            owner=args.as_actor or watches.LOCAL_OWNER, created_via="cli")
+        if args.json_out:
+            print(json.dumps(indriyas.card(made, store)))
+            return 0
+        served = serving(state) or {}
+        where = served.get("url") or "http://<this computer>:8782/"
+        print(f"added indriya {made.name}: {indriyas.sentence(made)}")
+        print(f"send it values: POST {where}inlet/indriya/{made.name}   with "
+              '{"value": 68.2} (or the number alone)')
+        print("               the key: prahari inlet"
+              + (f" --for {args.as_actor}" if args.as_actor else "")
+              + f"   try it here: prahari indriya push {made.name} 68.2")
+        print(f"watches decide on it with: prahari add NAME --sense {made.name} --when ...")
+        return 0
+    if sub == "push":
+        whose = {args.as_actor} if args.as_actor else home
+        indriya = indriyas.for_knock(store, args.name, whose)
+        if indriya.state != "active":
+            raise watches.WatchError(f"{indriya.name} is paused ({indriya.paused_because});"
+                                     f" prahari indriya resume {indriya.name}")
+        try:
+            body = json.loads(args.value)
+        except json.JSONDecodeError:
+            body = None
+        text = json.dumps(body if isinstance(body, dict) else {"value": args.value},
+                          sort_keys=True, ensure_ascii=False)
+        clock = _clock(state, store)
+        try:
+            reading = clock.push(indriya, text)
+        finally:
+            clock.close()
+        if args.json_out:
+            print(json.dumps(reading.as_dict()))
+            return 0
+        _print_reading(reading)
+        for watch in store.watches(sense=indriya.id):
+            for look in store.looks(watch.id, limit=1):
+                _print_look(look, with_watch=True)
+        return 0 if reading.outcome == "read" else 1
     if sub == "add":
         if not args.check:
-            raise watches.WatchError("an indriya needs --check TOOL (or --from-watch ID)")
+            raise watches.WatchError("an indriya needs --check TOOL (or --from-watch ID, "
+                                     "or --pushed)")
         given = _json_args(args.check_args)
         made = indriyas.create(
             store, name=args.name, check={"tool": args.check, "args": given},

@@ -288,7 +288,11 @@ TOOLS: list[dict] = [
              "it takes")},
          "move": {"type": "boolean", "description": (
              "with from_watch: move every watch of the person's on that same call onto "
-             "it -- only when they said so")}},
+             "it -- only when they said so")},
+         "pushed": {"type": "boolean", "description": (
+             "true when something sends the value itself (a Home Assistant sensor, a "
+             "script): no check; every is how often a value is expected at least. "
+             "The answer has the address and key to give the person")}},
          "required": ["name"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
     {"name": "update_indriya",
@@ -391,7 +395,8 @@ class Tools:
                    if last else "  not looked yet"))
         return "\n".join(lines)
 
-    def _inlet_address(self, args: dict) -> str:
+    def _addresses(self) -> tuple[str, str, str, dict]:
+        """This person's inlet: here, from anywhere (or ""), their key."""
         from prahari.http import inlet_token, public_inlet
 
         served = serving(self.state) or {}
@@ -399,6 +404,10 @@ class Tools:
         public = served.get("inlet_public") or public_inlet()
         key = (inlet_token(self.state) if self.person in self.home
                else self.store.inlet_key(self.person))
+        return url, public, key, served
+
+    def _inlet_address(self, args: dict) -> str:
+        url, public, key, served = self._addresses()
         lines = [f"POST {url}inlet/WORD?key={key}   (at home, on the house's network)"]
         if public:
             lines.append(f"POST {public}inlet/WORD?key={key}   (from anywhere)")
@@ -517,6 +526,28 @@ class Tools:
         return "\n".join(lines)
 
     def _create_indriya(self, args: dict) -> str:
+        if args.get("pushed"):
+            made = indriyas.create(
+                self.store, name=str(args.get("name") or ""), pushed=True,
+                pick=args.get("pick") or None, every=str(args.get("every") or ""),
+                thing=str(args.get("thing") or ""),
+                share=str(args.get("share") or "mine"), owner=self.person,
+                created_via="agent")
+            url, public, key, served = self._addresses()
+            lines = [f"Saved indriya {made.name}: {indriyas.sentence(made)}.",
+                     f"Its sender POSTs {{\"value\": ...}} (or the number alone) to "
+                     f"{url}inlet/indriya/{made.name}?key={key}   (at home)"]
+            if public:
+                lines.append(f"  or {public}inlet/indriya/{made.name}?key={key}   "
+                             "(from anywhere)")
+            lines.append("Give the person that address. In Home Assistant: a rest_command "
+                         "with payload {\"value\": \"{{ states('sensor.NAME') }}\"}, "
+                         "called by an automation when the sensor changes. Then watches "
+                         f"decide on it with sense: \"{made.name}\".")
+            if not served:
+                lines.append("Prahari is not running on this machine: nothing is taken in "
+                             "until it is -- tell the person.")
+            return "\n".join(lines)
         if args.get("from_watch"):
             if args.get("check") or args.get("pick"):
                 raise ToolFailed("from_watch takes the call and pick from the watch; "

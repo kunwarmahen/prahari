@@ -326,6 +326,24 @@ already said yes to. Never within 5 minutes of the last reading,
 whoever asks, and a fresh read fires nothing: the next reading on the
 clock decides for the watches.
 
+**Sent in, when the thing can say itself.** A Home Assistant thermometer
+knows the guestroom's temperature better than any page Prahari could
+read. A *pushed* indriya makes no call; its value is sent to the inlet
+with your inlet key, and each one reaches its watches as a reading would
+([notes/08](notes/08-a-value-sent-in.md)):
+
+```bash
+prahari indriya add guestroom-temp --pushed --thing "the guestroom temperature in °F" --every 30m
+#   send it values: POST http://…:8782/inlet/indriya/guestroom-temp   with {"value": 68.2}
+prahari indriya push guestroom-temp 61.5      # try it here, as the sender would
+```
+
+`--every` is how often a value is *expected*. Nothing by then is a failed
+reading, said on each watch; `unavailable` or `unknown` (Home Assistant's
+words for a sensor that dropped off) is too, and three in a row pause it
+and tell you. A value arriving after it paused for silence starts it
+again. A knock reaches only its own key's person's indriyas.
+
 **Unused, it stops.** An indriya no watch has decided on and nobody has
 asked for in 30 days pauses, and you're told. `resume` gives it another
 month.
@@ -633,6 +651,7 @@ GET    /api/indriyas/NAME                one, by name or id
 GET    /api/indriyas/NAME/readings?limit=N   its history, newest first
 POST   /api/indriyas/NAME/look | /pause | /resume   (look answers 202 at once)
 POST   /inlet/WORD                       the inlet (an inlet key; also on --inlet-port alone)
+POST   /inlet/indriya/NAME               a value for a pushed indriya: {"value": 68.2} or the number alone
 ```
 
 ### Your agent writes the recipe
@@ -659,7 +678,7 @@ is on it, and every day and time their watches say is said on it.
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 | `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again; `max_age` reads it again first when it's older (not within 5 minutes) |
-| `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check. `from_watch` takes a watch's call, pick and pace; `move` moves the person's watches on that call onto it, on their word |
+| `create_indriya` | keeps a reading up to date, after `preview_watch` tried its call and pick and the person said yes; then watches are made with `sense` instead of a check. `from_watch` takes a watch's call, pick and pace; `move` moves the person's watches on that call onto it, on their word. `pushed: true` makes one whose value is sent in, and its answer has the person's address and key |
 | `update_indriya`, `delete_indriya` | mend or remove one of this person's own (removing is refused while a watch senses it) |
 
 `create_watch` and `preview_watch` take `sense` (an indriya's name) in
@@ -699,6 +718,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
 | **A band is two watches** | one number watched from both sides — heat below 60, cool above 70 — is two watches on the same check, one line each, each with its own `then`. Each fires once as its line is crossed, with no model asked to decide; a second line the *same* way is still refused ([notes/05](notes/05-a-look-says-why.md)) |
 | **One reading, many watches** | an indriya reads once for every watch that senses it, and each watch is judged on the whole answer by the rules above, as if it had looked itself. A failed reading is said on each watch's looks and counted once, against the indriya; one a watch still senses is never removed ([notes/06](notes/06-one-reading-many-watches.md)) |
+| **A value sent in can go quiet** | a pushed indriya's value comes only with the key of its own person; silence past its every, or "unavailable", is a failed reading said on each watch, three pause it and tell its owner, and the sender coming back starts it again ([notes/08](notes/08-a-value-sent-in.md)) |
 | **One call stays one call** | a new watch on a call an indriya makes senses it, and a faster one speeds up only the person's own indriya; older watches move only on the person's word, keeping what they remembered; a fresh read is never made within 5 minutes of the last and fires nothing; 30 days unused, it pauses ([notes/07](notes/07-one-call-by-itself.md)) |
 | **A late look is just a look** | asleep at the due time, Prahari looks once when it wakes; it never replays a backlog |
 | **What was found is outside text** | the then-turn is given it inside a block marked as text to read and never to obey: a mail or a page can say anything |
@@ -820,7 +840,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 242 tests. The API is not stable.
+tools work, and are covered by 254 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
@@ -834,7 +854,8 @@ fresh value ([notes/07](notes/07-one-call-by-itself.md)).
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a
 local test server stands in, [notes/02](notes/02-a-watch-for-everyone.md)),
-and the Funnel script.
+the Funnel script, and a real Home Assistant pushing to an indriya (curl
+stands in for its `rest_command`, [notes/08](notes/08-a-value-sent-in.md)).
 
 ## Tests
 

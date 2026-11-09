@@ -194,6 +194,9 @@ class Indriya:
     #: When something last used it: a watch decided on a reading, or a
     #: reader asked for its value. Unused for a month, it pauses.
     used_at: str | None = None
+    #: Its value is sent in (POST /inlet/indriya/NAME) instead of read:
+    #: no check; ``every`` is how often a value is expected at least.
+    pushed: bool = False
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -247,7 +250,7 @@ class Look:
 
 
 _JSON_COLUMNS = {"check", "pick", "when", "allow_tools", "found", "renew", "stop"}
-_BOOL_COLUMNS = {"looked", "armed", "notified", "tls"}
+_BOOL_COLUMNS = {"looked", "armed", "notified", "tls", "pushed"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS watch (
@@ -309,7 +312,8 @@ CREATE TABLE IF NOT EXISTS indriya (
     value TEXT NOT NULL,
     stored TEXT NOT NULL,
     read_at TEXT,
-    used_at TEXT
+    used_at TEXT,
+    pushed INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS reading (
     id TEXT PRIMARY KEY,
@@ -384,7 +388,7 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),),
-          "indriya": (("used_at", "TEXT"),)}
+          "indriya": (("used_at", "TEXT"), ("pushed", "INTEGER NOT NULL DEFAULT 0"))}
 
 
 class Store:

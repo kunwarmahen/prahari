@@ -20,6 +20,9 @@
 
     POST   /inlet/WORD                     something to hear (an inlet key);
                                           202 at once, with how many watches heard
+    POST   /inlet/indriya/NAME             a value for a pushed indriya of the key's
+                                          person: {"value": 68.2} (or plain text);
+                                          202 at once
 
 A TOKEN, ALWAYS, as Samay's page has: any web page you visit can send a
 request to 127.0.0.1, so every ``/api`` call carries ``Authorization:
@@ -51,6 +54,13 @@ event, and its message id is the event's ``id``.
 A LIMIT ON KNOCKS. At most ``KNOCKS_PER_MINUTE`` a minute for one key,
 then 429: a sender stuck in a loop, or a key that leaked, must not be
 able to start a look every second.
+
+A VALUE CAN BE KNOCKED IN TOO. ``/inlet/indriya/NAME`` is for a pushed
+indriya (indriyas.py): the same key, the same limit, and the name is
+found only among the key's person's indriyas. Plain text is taken as
+``{"value": text}``. A pushed indriya that paused because nothing came
+starts again when something does; one paused by hand or unused stays
+paused, and says so.
 
 THE PUBLIC ROAD IS THE INLET ALONE. ``prahari serve --inlet-port`` opens
 a second listener that answers ``POST /inlet/WORD`` and nothing else --
@@ -283,6 +293,27 @@ class Api:
                              "max_per_day"),
             created_via="page", dvara=self.dvara if runner == "dvara" else None)
 
+    def push(self, name: str, raw: bytes, kind: str,
+             owners: set[str] | None = None) -> tuple[int, dict]:
+        """A value sent in for one of ``owners``' pushed indriyas."""
+        try:
+            indriya = indriyas.for_knock(self.store, name, self.clock.people(owners))
+        except watches.WatchError as exc:
+            raise ApiError(404 if str(exc).startswith("no indriya") else 409,
+                           str(exc)) from None
+        if indriya.state != "active":
+            if not indriya.paused_because.startswith("failed"):
+                raise ApiError(409, f"{indriya.name} is paused ({indriya.paused_because}); "
+                                    "resume it to take values again")
+            # it paused because its sender went quiet; the sender is back
+            indriya = indriyas.resume(self.store, indriya)
+        body = _event_body(raw, kind)
+        if set(body) == {"text"}:
+            body = {"value": body["text"].strip()}
+        text = json.dumps(body, sort_keys=True, ensure_ascii=False)
+        self.clock.submit_push(indriya, text)
+        return 202, {"pushed": indriya.name}
+
     def event(self, word: str, raw: bytes, kind: str,
               owners: set[str] | None = None) -> tuple[int, dict]:
         """Something sent to the inlet, for ``owners``' watches."""
@@ -493,9 +524,13 @@ def _handler(server: PrahariServer):
                 return self._json(413, {"detail": "an event is 16 KB at most"})
             raw = self.rfile.read(size) if size else b""
             word = url.path[len("/inlet/"):].strip("/")
+            kind = self.headers.get("Content-Type", "").lower()
             try:
-                status, data = server.api.event(
-                    word, raw, self.headers.get("Content-Type", "").lower(), owners)
+                if word.startswith("indriya/"):
+                    status, data = server.api.push(word[len("indriya/"):], raw, kind,
+                                                   owners)
+                else:
+                    status, data = server.api.event(word, raw, kind, owners)
             except ApiError as exc:
                 return self._json(exc.status, {"detail": exc.detail})
             except Exception as exc:

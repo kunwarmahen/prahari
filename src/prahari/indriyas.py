@@ -48,6 +48,18 @@ watches (a watch that fires might start a turn, and a reader's question
 would wait minutes on it), is not counted against the indriya, and does
 not move its clock. The next reading on the clock decides as always.
 
+PUSHED IN, WHEN THE THING CAN SAY ITSELF. A Home Assistant thermometer
+knows the guestroom's temperature better than any page Prahari could
+read. A ``pushed`` indriya makes no call: its value is sent to
+``POST /inlet/indriya/NAME`` with the person's own inlet key, picked
+(``{"value": ...}`` by default), kept, and handed to its watches as a
+reading the clock took would be. A KNOCK REACHES ONLY ITS OWN: the name
+is found among the indriyas of the key's person, as a knock is heard
+only by their watches. AND SILENCE IS SAID: its ``every`` is how often a
+value is expected at least; nothing by then is a failed reading, said on
+each watch and counted, three in a row pause it and tell its owner. An
+automation that broke must not look like a temperature that never moved.
+
 UNUSED, IT STOPS. Every reading a watch decides on, and every reader
 that asks for the value, marks it used (``used_at``). Thirty days with
 neither and the clock pauses it and tells its owner, as a watch with no
@@ -71,6 +83,10 @@ _NAME = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
 #: How often an indriya reads when nobody says (it is a shared thing, so a
 #: little more often than a watch's hour).
 DEFAULT_EVERY = "15m"
+#: How often a pushed indriya expects a value, when nobody says.
+DEFAULT_PUSHED_EVERY = "1h"
+#: What a pushed value is picked by, when nobody says: {"value": ...}.
+DEFAULT_PUSHED_PICK = {"json": "value"}
 #: A fresh read is not made sooner than this after the last reading.
 FRESH_FLOOR = recipe.MIN_EVERY
 #: Unused this long (no watch decided on it, nobody asked), it pauses.
@@ -85,16 +101,25 @@ def max_indriyas() -> int:
 
 
 def checked(*, name: str, check=None, pick=None, every: str = "", thing: str = "",
-            share: str = "mine") -> dict:
+            share: str = "mine", pushed: bool = False) -> dict:
     """An indriya's parts, checked together; WatchError in words."""
     name = (name or "").strip().lower()
     if not _NAME.match(name):
         raise WatchError(f"an indriya's name is one short lowercase word, letters, "
                          f"digits and dashes (outside-temp, btc-price), not {name!r}")
-    check = _call(check, "check")
-    if not check:
-        raise WatchError("an indriya needs a check -- {\"tool\": NAME, \"args\": {...}} "
-                         "-- the one call it reads with")
+    if pushed:
+        if check:
+            raise WatchError("a pushed indriya makes no call: its value is sent in "
+                             "(POST /inlet/indriya/NAME); leave out the check")
+        check = {}
+        pick = pick or DEFAULT_PUSHED_PICK
+        every = every or DEFAULT_PUSHED_EVERY
+    else:
+        check = _call(check, "check")
+        if not check:
+            raise WatchError("an indriya needs a check -- {\"tool\": NAME, \"args\": "
+                             "{...}} -- the one call it reads with, or pushed: its value "
+                             "sent in")
     try:
         pick = recipe.check_pick(pick)
         recipe.every(every or DEFAULT_EVERY)
@@ -114,21 +139,21 @@ def checked(*, name: str, check=None, pick=None, every: str = "", thing: str = "
 def create(store: Store, *, name: str, check=None, pick=None, every: str = "",
            thing: str = "", share: str = "mine", owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", created_via: str = "cli",
-           dvara=None) -> Indriya:
+           dvara=None, pushed: bool = False) -> Indriya:
     parts = checked(name=name, check=check, pick=pick, every=every, thing=thing,
-                    share=share)
+                    share=share, pushed=pushed)
     if any(i.name == parts["name"] for i in store.indriyas(owner=owner)):
         raise WatchError(f"{owner} already has an indriya called {parts['name']}; "
                          "mend that one, or choose another name")
     twin = next((i for i in store.indriyas(owner=owner)
-                 if i.check == parts["check"]), None)
+                 if not pushed and i.check == parts["check"]), None)
     if twin is not None:
         raise WatchError(f"{owner}'s indriya {twin.name} already reads with exactly this "
                          f"call; sense that one (and pick from its answer) instead of "
                          "calling twice")
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
-    if runner == "dvara":
+    if runner == "dvara" and not pushed:
         if not agent:
             raise WatchError("the Dvara road names the agent that reads: --agent NAME")
         if dvara is None:
@@ -139,8 +164,11 @@ def create(store: Store, *, name: str, check=None, pick=None, every: str = "",
                              "PRAHARI_DVARA_ACTOR")
     if len(store.indriyas(owner=owner)) >= max_indriyas():
         raise WatchError(f"{owner} has {max_indriyas()} indriyas already; remove one first")
-    made = Indriya(id="", owner=owner, runner=runner, agent=agent,
-                   created_via=created_via, next_at=iso(now_utc()), **parts)
+    # a pushed one's first deadline is one every from now; a read one reads now
+    first = (now_utc() + recipe.every(parts["every"])) if pushed else now_utc()
+    made = Indriya(id="", owner=owner, runner="direct" if pushed else runner,
+                   agent=agent, created_via=created_via, next_at=iso(first),
+                   pushed=pushed, **parts)
     return store.add_indriya(made)
 
 
@@ -191,14 +219,18 @@ def update(store: Store, indriya_id: str, **changes) -> Indriya:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
+    if current.pushed and given.get("check"):
+        raise WatchError(f"{current.name} is pushed in: it has no call to change")
     parts = checked(name=current.name, check=given.get("check", current.check),
                     pick=given.get("pick", current.pick),
                     every=given.get("every", current.every),
                     thing=given.get("thing", current.thing),
-                    share=given.get("share", current.share))
+                    share=given.get("share", current.share), pushed=current.pushed)
     fields = {k: parts[k] for k in ("check", "pick", "every", "thing", "share")}
     if {"check", "pick"} & set(given):
-        fields.update(value="", stored="", read_at=None, trouble=0, next_at=iso(now_utc()))
+        fields.update(value="", stored="", read_at=None, trouble=0,
+                      next_at=iso(now_utc() + recipe.every(parts["every"])
+                                  if current.pushed else now_utc()))
         if current.state == "paused" and current.paused_because.startswith(
                 ("broken", "failed")):
             fields.update(state="active", paused_because="")
@@ -252,6 +284,20 @@ def from_watch(store: Store, watch: Watch, *, name: str, share: str = "mine",
         return made, [], same
     moved = [watches_module.update(store, w.id, sense=made.id, home=home) for w in same]
     return store.get_indriya(made.id) or made, moved, []
+
+
+def for_knock(store: Store, name: str, people: set[str] | None) -> Indriya:
+    """The pushed indriya a knock on ``/inlet/indriya/NAME`` is for: among
+    the key's people only, so another person's name answers the same as
+    one that doesn't exist."""
+    wanted = (name or "").strip().lower()
+    for indriya in store.indriyas():
+        if indriya.name == wanted and (people is None or indriya.owner in people):
+            if not indriya.pushed:
+                raise WatchError(f"{indriya.name} reads on its own; nothing is pushed "
+                                 "to it (make one with --pushed)")
+            return indriya
+    raise WatchError(f"no indriya {wanted} to push to, for this key")
 
 
 def reader_for(store: Store, owner: str, check: dict,
@@ -324,6 +370,9 @@ def fresh(store: Store, caller, indriya: Indriya, too_old: timedelta | None) -> 
     read = from_iso(indriya.read_at)
     if read is not None and now - read <= too_old:
         return indriya, ""
+    if indriya.pushed:
+        return indriya, (f"not read again: {indriya.name} is pushed in by its sender, "
+                         "so this is the latest value that came")
     if indriya.state != "active":
         return indriya, (f"not read again: {indriya.name} is paused "
                          f"({indriya.paused_because or 'by hand'})")
@@ -385,6 +434,12 @@ def age_words(stamp: str | None) -> str:
 
 def sentence(indriya: Indriya) -> str:
     """The indriya in words: what it reads, where, and how often."""
+    if indriya.pushed:
+        thing = recipe.thing_words(indriya.pick, indriya.thing)
+        return (f"keeps {thing}, pushed in to the inlet as {indriya.name} (a value "
+                f"expected at least every "
+                f"{recipe.duration_words(recipe.every(indriya.every))})"
+                + ("; shared with the house" if indriya.share == "house" else ""))
     where = recipe.where_words(indriya.check)
     tool = indriya.check.get("tool", "?")
     look = (f"looks with {where}" if where.startswith(tool)
