@@ -513,6 +513,10 @@ def card(watch: Watch, store: Store | None = None) -> dict:
     if store is not None:
         last = store.looks(watch.id, limit=1)
         data["last_look"] = last[0].as_dict() if last else None
+        if watch.sense:
+            # its indriya by name: a page says "senses outside-temp", not an id
+            found = store.get_indriya(watch.sense)
+            data["sense_name"] = found.name if found else ""
         day = now_utc() - timedelta(days=1)
         data["fired_today"] = store.fired_since(watch.id, day)
     return data

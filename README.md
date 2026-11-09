@@ -279,6 +279,7 @@ prahari indriya look outside-temp      # read once, now; each watch decides on i
 #   63e8fd74  Sun 8 Nov 17:23  fired      57  then: told
 
 prahari indriya list                   # every reading, its value and age, who senses it
+prahari indriya list --as asha --json  # as asha sees them: her own, then the house's
 prahari indriya get outside-temp --json
 prahari indriya readings outside-temp  # its history, newest first (the last 500)
 prahari indriya edit outside-temp --every 30m    # also --check/--args/--pick/--share
@@ -296,7 +297,16 @@ can't be removed.
 **Shared with the house, or not.** An indriya reads with your accounts.
 `--share house` lets everyone's watches and agents read its *value*. It
 never lets them call anything as you, or change it. It starts as
-`mine`.
+`mine`. `list`, `get` and `readings` take `--as PERSON` to answer as
+that person sees them, which is how Dvara's `/indriyas` asks, so a
+private reading never reaches someone else's list.
+
+**The agent knows they're there.** Yantra names each reading the person
+may use in its prompt (what it reads and how often, never the value,
+which would be stale in minutes), so *"how cold is it outside?"* is
+answered from `read_indriya` instead of another weather call. The
+Watches panel on Yantra's page lists them beside the watches, and in a
+chat `/indriyas` does.
 
 Every command takes `--json`.
 
@@ -776,7 +786,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 219 tests. The API is not stable.
+tools work, and are covered by 221 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,

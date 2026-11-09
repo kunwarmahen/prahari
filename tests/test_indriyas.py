@@ -355,3 +355,33 @@ class TestTheOtherDoors:
         assert rc == 2 and "remove those watches first" in err
         rc, out, _ = run("indriya", "list")
         assert "outside-temp: not read yet" in out and "sensed by:" in out
+
+    def test_the_terminal_lists_as_another_person_sees_them(self, tmp_path, capsys):
+        """Dvara asks ``prahari indriya list --as PERSON``: their own and the
+        house's, never someone's private one."""
+        store = store_module.Store(tmp_path / "prahari.sqlite3")
+        outside(store, share="house")
+        indriyas.create(store, name="bank-mail", check={"tool": "gmail_search",
+                        "args": {"q": "from:bank"}}, pick={"number": ""})
+        indriyas.create(store, name="asha-steps", owner="asha",
+                        check={"tool": "steps", "args": {}}, pick={"number": ""})
+        del store
+
+        def names(*argv):
+            assert cli.main(["--state", str(tmp_path), "indriya", *argv, "--json"]) == 0
+            got = json.loads(capsys.readouterr().out)
+            return [i["name"] for i in got] if isinstance(got, list) else got["name"]
+
+        assert names("list", "--as", "asha") == ["asha-steps", "outside-temp"]
+        assert names("list") == ["outside-temp", "bank-mail"]
+        assert names("get", "outside-temp", "--as", "asha") == "outside-temp"
+        assert cli.main(["--state", str(tmp_path), "indriya", "get", "bank-mail",
+                         "--as", "asha"]) == 2
+        assert "no indriya bank-mail" in capsys.readouterr().err
+
+    def test_a_sensing_watchs_card_names_its_reading(self, tmp_path):
+        store, clock = make_clock(tmp_path, FakeCaller(ANSWER))
+        outside(store)
+        heat, _ = band(store)
+        assert watches.card(store.get(heat.id), store)["sense_name"] == "outside-temp"
+        clock.close()

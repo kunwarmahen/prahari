@@ -220,14 +220,20 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--thing", default=None, metavar="WORDS")
     i.add_argument("--share", choices=("mine", "house"), default=None)
     i.add_argument("--json", action="store_true", dest="json_out")
+    as_help = ("as that person sees them: their own, then the house's (default: "
+               "this computer's person)")
     i = isub.add_parser("list", help="every indriya and what it read last")
-    i.add_argument("--json", action="store_true", dest="json_out")
-    i = isub.add_parser("readings", help="what it read, newest first")
-    i.add_argument("name")
-    i.add_argument("--limit", type=int, default=20)
+    i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
     i.add_argument("--json", action="store_true", dest="json_out")
     for name, text in (("get", "its value now, with how old it is"),
-                       ("look", "read once, now, and wait"),
+                       ("readings", "what it read, newest first")):
+        i = isub.add_parser(name, help=text)
+        i.add_argument("name")
+        if name == "readings":
+            i.add_argument("--limit", type=int, default=20)
+        i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
+        i.add_argument("--json", action="store_true", dest="json_out")
+    for name, text in (("look", "read once, now, and wait"),
                        ("pause", "stop reading, keep it"), ("resume", "read again, from now"),
                        ("rm", "remove it and its readings (not while a watch senses it)")):
         i = isub.add_parser(name, help=text)
@@ -675,8 +681,11 @@ def _indriya(args, store: Store, state: Path) -> int:
             if serving(state) is None:
                 print("prahari serve is not running: nothing is read until it is")
         return 0
+    # Reading is anyone's who may see it (--as: Dvara asks for its person);
+    # changing one is only ever this computer's person's own.
+    reader = getattr(args, "as_actor", "") or watches.LOCAL_OWNER
     if sub == "list":
-        found = indriyas.visible(store, watches.LOCAL_OWNER, home)
+        found = indriyas.visible(store, reader, home)
         if args.json_out:
             print(json.dumps([indriyas.card(i, store) for i in found]))
             return 0
@@ -686,7 +695,7 @@ def _indriya(args, store: Store, state: Path) -> int:
         for indriya in found:
             _print_indriya(indriya, store)
         return 0
-    indriya = indriyas.find(store, args.name, watches.LOCAL_OWNER, home,
+    indriya = indriyas.find(store, args.name, reader, home,
                             own_only=sub in ("edit", "pause", "resume", "rm", "look"))
     if sub == "get":
         if args.json_out:

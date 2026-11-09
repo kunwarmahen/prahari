@@ -105,10 +105,14 @@ depends on how Prahari keeps it:
 | any agent: the Yantra page, a Dvara chat, Telegram, the puck, a Samay run | `list_indriyas` and `read_indriya` on `prahari mcp`, which Yantra already attaches to every turn |
 | a page, Home Assistant, a script that speaks HTTP | `GET /api/indriyas`, `/api/indriyas/NAME`, `/api/indriyas/NAME/readings` |
 | a terminal | `prahari indriya get NAME --json` |
+| a program asking for one person (Dvara's `/indriyas`) | `prahari indriya list --as PERSON --json`: their own, then the house's |
 
 `list_indriyas` tells the model so in its description: when a fresh
 reading answers what the person asked, answer from it instead of calling
-the tool again. The agent can also make one (`create_indriya`), from a
+the tool again. A description is only read once a model has picked the
+tool, so Yantra also names each reading in its prompt (Yantra's
+notes/154), and a local model asked *"how cold is it outside right now?"* read
+`outside-temp` and made no weather call. The agent can also make one (`create_indriya`), from a
 tool it already has: preview the call and pick first, tell the person
 what it sees, and save only on their yes. It writes a definition, never
 code that runs every fifteen minutes.
