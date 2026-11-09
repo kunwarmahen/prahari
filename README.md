@@ -340,13 +340,29 @@ prahari indriya add outside-temp --from-watch aa5afa6c   # its call, pick and pa
 #     f243cf84  Cool the guestroom
 prahari edit aa5afa6c --sense outside-temp                # one by one, or
 prahari indriya add outside-temp --from-watch aa5afa6c --move   # all at once
+prahari edit aa5afa6c --look-itself                       # and back to its own call
+```
+
+**A pace given back.** Each watch that sped a reading up keeps how often
+it asked; when it is removed, ends, or goes back to its own call, the
+reading slows to the slowest pace still wanted (your own `--every`, or
+the fastest watch left), and says so. Your `--every` is the last word.
+A site that asks for fewer calls gets a floor, kept once for the house:
+new watches and readings faster than it are refused, and setting it slows
+what already calls faster
+([notes/12](notes/12-a-pace-given-back.md)):
+
+```bash
+prahari floor set open-meteo.com 15m --why "their free tier"   # host (and subdomains) or a tool
+prahari floor list
+prahari floor rm open-meteo.com                                  # back to 5 minutes
 ```
 
 **Fresh on asking.** `prahari indriya get outside-temp --max-age 5m`
 (and `read_indriya`'s `max_age`, and `?max_age=` on the API) reads it
 again first when the kept value is older than that, with the call you
-already said yes to. Never within 5 minutes of the last reading,
-whoever asks, and a fresh read fires nothing: the next reading on the
+already said yes to. Never within 5 minutes of the last reading (or the
+site's floor), whoever asks, and a fresh read fires nothing: the next reading on the
 clock decides for the watches.
 
 **Sent in, when the thing can say itself.** A Home Assistant thermometer
@@ -359,7 +375,14 @@ with your inlet key, and each one reaches its watches as a reading would
 prahari indriya add guestroom-temp --pushed --thing "the guestroom temperature in °F" --every 30m
 #   send it values: POST http://…:8782/inlet/indriya/guestroom-temp   with {"value": 68.2}
 prahari indriya push guestroom-temp 61.5      # try it here, as the sender would
+prahari indriya push guestroom-temp 61.5 --at 2026-11-09T08:40:00-05:00   # measured then
 ```
+
+A value may say when it was measured: `{"value": 61.5, "at": "…"}` (ISO
+8601 with a zone, or seconds since 1970). Its age is counted from then,
+and one measured before the value already kept is **late**: in the
+history, never kept or handed to the watches, so a queue sent after the
+network came back doesn't fire a watch on the past.
 
 Home Assistant sends it with a `rest_command` posting `{"value": "{{
 states('sensor.guestroom_temperature') }}"}`, from an automation that
@@ -383,7 +406,8 @@ hand, asked for fresh, sent in, or nothing came in time) and what every
 watch on it decided, so *"why didn't my guestroom watch fire?"* has one
 answer: **Readings** under each indriya on this page and on Yantra's
 Watches panel, `/indriyas 2` in a chat, `read_indriya` for the agent
-([notes/09](notes/09-what-happened-to-a-reading.md)).
+([notes/09](notes/09-what-happened-to-a-reading.md)). Readings from before
+looks kept which one they judged show their watches *matched by time*.
 
 **The agent knows they're there.** Yantra names each reading the person
 may use in its prompt (what it reads and how often, never the value,
@@ -711,7 +735,7 @@ is on it, and every day and time their watches say is said on it.
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
 | `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches); on a call an indriya already makes it senses that indriya and says so (`look_itself: true` for its own call); `routine` starts one of the person's Vidhi routines when it fires, instead of `then` |
-| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya; `routine` gives it a routine to start (a `then` takes it away) |
+| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya, and `look_itself: true` moves it back to its own call (the person's own indriya only); `routine` gives it a routine to start (a `then` takes it away) |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 | `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again; `max_age` reads it again first when it's older (not within 5 minutes) |
@@ -865,7 +889,12 @@ src/prahari/
 │                ([notes/06](notes/06-one-reading-many-watches.md)); made from
 │                a watch, found for a new watch on the same call, sped up to
 │                the fastest need, read fresh on asking, unused for a month
-│                ([notes/07](notes/07-one-call-by-itself.md))
+│                ([notes/07](notes/07-one-call-by-itself.md)); slowed back down
+│                when a watch's wish goes, older history matched by time
+│                ([notes/12](notes/12-a-pace-given-back.md))
+├── floors.py    the least time between two calls to one site (a host or a
+│                tool), kept for the house; refused below, slowed down to
+│                ([notes/12](notes/12-a-pace-given-back.md))
 ├── clock.py     the rules above; the loop prahari serve runs; an indriya's
 │                readings, handed to each watch that senses it; a watch's
 │                days (it ends, asks, is removed); each look's why and
@@ -905,7 +934,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 279 tests. The API is not stable.
+tools work, and are covered by 310 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
@@ -916,13 +945,15 @@ read again through the page's API and `prahari mcp`
 moved onto it without telling you twice, and a local model asking for a
 fresh value ([notes/07](notes/07-one-call-by-itself.md)); a reading
 installed from the outside-temperature template, and one from a
-marketplace, signed, read for real ([notes/11](notes/11-a-reading-from-a-template.md)).
+marketplace, signed, read for real ([notes/11](notes/11-a-reading-from-a-template.md));
+the house's Home Assistant pushing the guestroom temperature
+([notes/08](notes/08-a-value-sent-in.md)).
 
 Not run for real yet: Gmail's push against Google (it needs a Pub/Sub
 topic and the public name), IMAP IDLE against a real mail server (a
 local test server stands in, [notes/02](notes/02-a-watch-for-everyone.md)),
-the Funnel script, and a real Home Assistant pushing to an indriya (curl
-stands in for its `rest_command`, [notes/08](notes/08-a-value-sent-in.md)).
+the Funnel script, and a Home Assistant sending a value's own time
+(`"at"`, [notes/12](notes/12-a-pace-given-back.md)).
 
 ## Tests
 

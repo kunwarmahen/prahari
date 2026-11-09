@@ -114,6 +114,7 @@ header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margi
 .looks > li > details[open] > summary::before { content: "▾"; }
 .looks .why { color: var(--ink-2); margin: 3px 0 0 18px; }
 .looks details[open] > summary .why { display: none; }
+.dim { color: var(--ink-2); }
 .looks dl.full { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px;
                  margin: 8px 0 4px 18px; font-size: 13px; }
 .looks dl.full dt { color: var(--ink-3); }
@@ -252,7 +253,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
                                          hour: "2-digit", minute: "2-digit" }); };
   const words = { learned: "learned", quiet: "quiet", fired: "fired", limited: "limited",
     broken: "broken", failed: "failed", needs_person: "needs you", running: "looking",
-    interrupted: "stopped", read: "read", busy: "busy" };
+    interrupted: "stopped", read: "read", busy: "busy", late: "late" };
   function fail(err) { $("error").textContent = String(err.message || err);
                        $("error").classList.remove("hidden"); }
   let lookingAt = null;
@@ -368,12 +369,13 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
     const rows = [];
     const row = (k, v) => { if (v) rows.push(`<dt>${k}</dt><dd>${v}</dd>`); };
     row("Came", esc(r.came_words));
+    if (r.measured_at && r.measured_at !== r.at) row("Measured", when(r.measured_at));
     row("Why", esc(r.why));
     if (r.detail && r.detail !== r.why) row("What went wrong", esc(r.detail));
     row("Kept", r.value ? `<code>${esc(r.value)}</code>` : "");
     const decided = r.decided.map((d) => `<li><b>${esc(d.name)}</b>
         <span class="out ${esc(d.outcome)}">${esc(words[d.outcome] || d.outcome)}</span>
-        ${d.notified ? " · told you" : ""}${d.why ? `<div class="why">${esc(d.why)}</div>` : ""}</li>`);
+        ${d.notified ? " · told you" : ""}${d.matched_by_time ? ` · <span class="dim" title="Made before each look kept which reading it judged: matched to the reading just before it">matched by time</span>` : ""}${d.why ? `<div class="why">${esc(d.why)}</div>` : ""}</li>`);
     if (r.others) decided.push(`<li>and ${r.others} of other people's watches</li>`);
     row("Watches", decided.length ? `<ul class="found">${decided.join("")}</ul>`
         : (r.came_by === "asked" ? "read on asking: no watch decides on these" : "none sensed it then"));

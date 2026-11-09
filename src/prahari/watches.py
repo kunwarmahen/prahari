@@ -211,20 +211,23 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None, sense: str = "", home: set[str] | None = None,
            look_itself: bool = False, notes: list[str] | None = None,
-           routine: str = "", routine_inputs=None) -> Watch:
+           routine: str = "", routine_inputs=None, wants_every: str = "") -> Watch:
     """A new watch. ``notes`` gathers what Prahari decided on the person's
     behalf, in words, for the caller to say: a watch on a call an indriya
     already makes senses it instead (``look_itself`` says no)."""
     if check and not sense and not look_itself and not wake and not renew:
         reader = _reader(store, owner, check, every, home, notes)
         if reader is not None:
+            from prahari import indriyas
+            # its wish is kept, so the reading slows back down when it goes
+            wish = every.strip() if every and indriyas.is_own(reader, owner, home) else ""
             return create(store, name=name, pick=pick if pick else None, when=when,
                           then=then, asked=asked, thing=thing, starts=starts, ends=ends,
                           stop=stop, zone=zone, owner=owner, runner=runner, agent=agent,
                           allow_tools=allow_tools, wait=wait, time_limit=time_limit,
                           max_per_day=max_per_day, created_via=created_via, dvara=dvara,
                           sense=reader.id, home=home, notes=notes, routine=routine,
-                          routine_inputs=routine_inputs)
+                          routine_inputs=routine_inputs, wants_every=wish)
     sensed = None
     if sense:
         from prahari import indriyas
@@ -237,6 +240,9 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
                     starts=starts, ends=ends, stop=stop, zone=zone, sense=sensed)
     if parts["ends"] and from_iso(parts["ends"]) <= now_utc():
         raise WatchError(f"ends ({shown_at(parts['ends'], zone)}) has already passed")
+    if parts["check"] and parts["every"]:
+        from prahari import floors
+        floors.check_pace(store, parts["check"], parts["every"], "this watch")
     twin = same_as(store, owner, parts)
     if twin is not None:
         raise WatchError(
@@ -272,7 +278,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
                   routine_inputs=given_inputs, runner=runner,
                   agent=agent, allow_tools=grants, wait=int(wait),
                   time_limit=int(time_limit), max_per_day=int(max_per_day),
-                  created_via=created_via, **parts)
+                  created_via=created_via, wants_every=wants_every if sensed else "",
+                  **parts)
     if parts["listen"]:
         # An event is news by being sent: there is nothing to learn first.
         watch.looked = True
@@ -407,13 +414,17 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
                "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
-               "keep", "sense", "home", "routine", "routine_inputs"}
+               "keep", "sense", "home", "routine", "routine_inputs", "look_itself",
+               "notes"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
     home = given.pop("home", None)
+    notes = given.pop("notes", None)
+    if given.pop("look_itself", None):
+        return _move_off(store, watch, home, given, notes)
     if given.get("sense"):
         return _move_onto(store, watch, str(given.pop("sense")), home, given)
     given.pop("sense", None)
@@ -445,6 +456,9 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         stop=given.get("stop", watch.stop), zone=watch.zone)
     if "ends" in given and _passed(parts["ends"]):
         raise WatchError(f"ends ({shown_at(parts['ends'], watch.zone)}) has already passed")
+    if looks_itself and {"check", "every"} & set(given):
+        from prahari import floors
+        floors.check_pace(store, parts["check"], parts["every"], "this watch")
     fields: dict = {"name": parts["name"], "asked": parts["asked"], "thing": parts["thing"],
                     "wake": parts["wake"], "renew": parts["renew"], "starts": parts["starts"],
                     "ends": parts["ends"], "stop": parts["stop"]}
@@ -455,6 +469,13 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
                       kept_at=iso(now_utc()), still_asked_at=None)
         if looks_itself:
             fields["next_at"] = iso(now_utc())
+        if sensed is not None and watch.wants_every:
+            # back from ended, its wish counts again
+            from prahari import indriyas
+            if indriyas.is_own(sensed, watch.owner, home):
+                said = indriyas.keep_up(store, sensed, watch.wants_every)
+                if said and notes is not None:
+                    notes.append(said)
     if "renew" in given:
         fields["renew_at"] = iso(now_utc()) if parts["renew"] else None
     if recipe_keys & set(given):
@@ -535,12 +556,63 @@ def _move_onto(store: Store, watch: Watch, sense: str, home: set[str] | None,
         fields.update(armed=True, last_value="", trouble=0, looked=False)
     if indriyas.is_own(reader, watch.owner, home) and watch.every:
         indriyas.keep_up(store, reader, watch.every)
+        fields["wants_every"] = watch.every
     for key in ("name", "asked", "then"):
         if rest.get(key) is not None:
             fields[key] = str(rest[key]).strip()
     store.update(watch.id, **fields)
     if not same:
         store.forget_seen(watch.id)
+    return store.get(watch.id)
+
+
+def _move_off(store: Store, watch: Watch, home: set[str] | None, rest: dict,
+              notes: list[str] | None) -> Watch:
+    """A watch that sensed a reading, given its own call again: the
+    reading's call, its own pick, and the pace it asked for when it went
+    by the reading (else the reading's).
+
+    WHAT IT REMEMBERED IS KEPT. Its pick was always applied to the very
+    answer this call gives, so the value it compared against is still the
+    one to compare against: the heat watch that told you *below 60* stays
+    waiting for the temperature to come back up.
+
+    ONLY YOUR OWN READING'S CALL. A house reading kept by someone else
+    calls with their accounts, on their road; a watch can't take that
+    call over as its own. Make it anew with --look-itself on your own call.
+
+    The reading then slows back down if this watch was its fastest need."""
+    from prahari import floors, indriyas
+
+    if not watch.sense:
+        raise WatchError(f"{watch.id} doesn't sense a reading (it "
+                         + ("listens" if watch.listen else "looks itself already") + ")")
+    moving = {k for k, v in rest.items() if v is not None}
+    if moving - {"name", "asked", "thing", "then"}:
+        raise WatchError("going back to its own call is a change of its own: give "
+                         "--look-itself alone (or with a name); mend the rest after")
+    reader = store.get_indriya(watch.sense)
+    if reader is None:
+        raise WatchError(f"the indriya {watch.id} sensed is gone; remove the watch and "
+                         "make it anew")
+    if reader.pushed:
+        raise WatchError(f"{reader.name} is sent in, not read: there is no call for the "
+                         "watch to make itself")
+    if not indriyas.is_own(reader, watch.owner, home):
+        raise WatchError(f"{reader.name} is {reader.owner}'s: its call is made with their "
+                         "accounts, so it can't become this watch's own. Remove the watch "
+                         "and make it anew with --look-itself on your own call")
+    every = floors.at_floor(store, reader.check, watch.wants_every or reader.every)
+    fields: dict = {"sense": "", "check": reader.check, "every": every,
+                    "wants_every": "", "next_at": iso(now_utc()),
+                    "pick": watch.pick or reader.pick}
+    for key in ("name", "asked", "thing", "then"):
+        if rest.get(key) is not None:
+            fields[key] = str(rest[key]).strip()
+    store.update(watch.id, **fields)
+    said = indriyas.settle(store, reader)
+    if said and notes is not None:
+        notes.append(said)
     return store.get(watch.id)
 
 
@@ -570,9 +642,18 @@ def allow(store: Store, watch_id: str, grants: list[str],
     return store.get(watch.id)
 
 
-def remove(store: Store, watch_id: str, owner: str | None = None) -> Watch:
+def remove(store: Store, watch_id: str, owner: str | None = None,
+           notes: list[str] | None = None) -> Watch:
+    """Remove it. A reading it sensed slows back down if this watch was
+    its fastest need (said in ``notes``)."""
     watch = find(store, watch_id, owner=owner)
     store.delete(watch.id)
+    if watch.sense:
+        from prahari import indriyas
+        sensed = store.get_indriya(watch.sense)
+        said = indriyas.settle(store, sensed) if sensed is not None else ""
+        if said and notes is not None:
+            notes.append(said)
     return watch
 
 

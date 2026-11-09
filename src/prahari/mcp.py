@@ -233,6 +233,11 @@ TOOLS: list[dict] = [
              "stops calling and decides on each reading. Give it alone (a new name "
              "may go with it); what it remembered is kept when the indriya makes "
              "the same call")},
+         "look_itself": {"type": "boolean", "description": (
+             "true to move a watch that senses an indriya back to making that call "
+             "itself (only for the person's own indriya; what it remembered is kept, "
+             "and the indriya slows back down if this watch was its fastest need). "
+             "Give it alone")},
          "then": {"type": "string"}, "routine": _ROUTINE,
          "routine_inputs": _ROUTINE_INPUTS,
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
@@ -511,13 +516,15 @@ class Tools:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
                                         "every", "then", "max_per_day", "wake", "renew",
                                         "starts", "ends", "stop", "keep", "sense",
-                                        "routine", "routine_inputs")
+                                        "routine", "routine_inputs", "look_itself")
                    if k in args}
-        if changes.get("sense"):
+        if changes.get("sense") or changes.get("look_itself"):
             changes["home"] = self.home
+        notes: list[str] = []
         watch = watches.update(self.store, self._mine(args).id, owner=self.person,
-                               **changes)
-        return f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch, self.store)}."
+                               notes=notes, **changes)
+        return (f"Updated {watch.id}: {watch.name} -- {watches.sentence(watch, self.store)}."
+                + "".join(f" {line}." for line in notes))
 
     def _pause_watch(self, args: dict) -> str:
         return f"Paused {watches.pause(self.store, self._mine(args).id).id}."
@@ -534,8 +541,9 @@ class Tools:
         return f"{watch.id} may now use without asking: {', '.join(watch.allow_tools)}."
 
     def _delete_watch(self, args: dict) -> str:
-        watch = watches.remove(self.store, self._mine(args).id)
-        return f"Deleted {watch.id} ({watch.name})."
+        notes: list[str] = []
+        watch = watches.remove(self.store, self._mine(args).id, notes=notes)
+        return f"Deleted {watch.id} ({watch.name})." + "".join(f" {n}." for n in notes)
 
     # -- indriyas ----------------------------------------------------------
 

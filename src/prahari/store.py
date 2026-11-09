@@ -70,7 +70,9 @@ SEEN_CAP = 5000
 #:   failed    the call itself failed (or the site turned it away)
 #:   needs_person  a sign-in wall or a yes: paused until the person is back
 #:   busy      what the call needs was in use elsewhere; skipped
-READING_OUTCOMES = ("read", "broken", "failed", "needs_person", "busy")
+#:   late      a pushed value measured before the one already kept: in the
+#:             history, not kept and not handed to the watches
+READING_OUTCOMES = ("read", "broken", "failed", "needs_person", "busy", "late")
 INDRIYA_SHARES = ("mine", "house")
 #: Readings an indriya keeps; the oldest go first past this.
 READINGS_KEPT = 500
@@ -166,6 +168,11 @@ class Watch:
     #: The indriya this watch senses (its id): it has no check of its own,
     #: and decides on each of the indriya's readings. "" for none.
     sense: str = ""
+    #: For a watch that senses: how often it asked to look, when it went by
+    #: the reading. Its indriya reads no slower than the fastest such wish,
+    #: and slows back down when the wish goes; moved back off, it looks
+    #: itself this often again. "" for none.
+    wants_every: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -203,6 +210,11 @@ class Indriya:
     #: Its value is sent in (POST /inlet/indriya/NAME) instead of read:
     #: no check; ``every`` is how often a value is expected at least.
     pushed: bool = False
+    #: How often its owner said it should read (made, or edited with
+    #: --every); watches may speed it up past this, and when they go it
+    #: comes back to it. "" for one made before this was kept: it is not
+    #: slowed down, since nobody knows what it was.
+    own_every: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -224,6 +236,22 @@ class Reading:
     #: reader wanted it fresher), "pushed" (sent in), "silence" (a
     #: pushed one's deadline passed with nothing).
     came_by: str = "clock"
+    #: For a pushed value that said when it was measured: that time. ``at``
+    #: stays when it arrived. None: measured as it arrived.
+    measured_at: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Floor:
+    """The least time between two calls to one site: a weather service
+    that asks for no more than one call in fifteen minutes."""
+    site: str
+    every: str
+    why: str = ""
+    set_at: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -340,6 +368,12 @@ CREATE TABLE IF NOT EXISTS reading (
     said TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reading_by_indriya ON reading (indriya, at);
+CREATE TABLE IF NOT EXISTS floor (
+    site TEXT PRIMARY KEY,
+    every TEXT NOT NULL,
+    why TEXT NOT NULL,
+    set_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS look (
     id TEXT PRIMARY KEY,
     watch TEXT NOT NULL,
@@ -399,13 +433,16 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("zone", "TEXT NOT NULL DEFAULT ''"),
                     ("sense", "TEXT NOT NULL DEFAULT ''"),
                     ("routine", "TEXT NOT NULL DEFAULT ''"),
-                    ("routine_inputs", "TEXT NOT NULL DEFAULT '{}'")),
+                    ("routine_inputs", "TEXT NOT NULL DEFAULT '{}'"),
+                    ("wants_every", "TEXT NOT NULL DEFAULT ''")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''"),
                    ("reading", "TEXT NOT NULL DEFAULT ''")),
-          "reading": (("came_by", "TEXT NOT NULL DEFAULT 'clock'"),),
+          "reading": (("came_by", "TEXT NOT NULL DEFAULT 'clock'"),
+                      ("measured_at", "TEXT")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),),
-          "indriya": (("used_at", "TEXT"), ("pushed", "INTEGER NOT NULL DEFAULT 0"))}
+          "indriya": (("used_at", "TEXT"), ("pushed", "INTEGER NOT NULL DEFAULT 0"),
+                      ("own_every", "TEXT NOT NULL DEFAULT ''"))}
 
 
 class Store:
@@ -665,6 +702,37 @@ class Store:
                               "ORDER BY at DESC, rowid DESC LIMIT ?",
                               (indriya_id, limit)).fetchall()
         return [_load(Reading, r) for r in rows]
+
+    def unmarked_looks(self, watch_ids: list[str], since: str, until: str) -> list[Look]:
+        """Looks of these watches made on an indriya's reading, between two
+        times, that don't say which reading -- made before looks kept it."""
+        if not watch_ids:
+            return []
+        marks = ",".join("?" * len(watch_ids))
+        with self._db() as db:
+            rows = db.execute(f"SELECT * FROM look WHERE watch IN ({marks}) AND reading = '' "
+                              "AND came_by = 'indriya' AND started_at >= ? AND "
+                              "started_at <= ? ORDER BY started_at",
+                              [*watch_ids, since, until]).fetchall()
+        return [_load(Look, r) for r in rows]
+
+    # -- floors --------------------------------------------------------------
+
+    def floors(self) -> list[Floor]:
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM floor ORDER BY site").fetchall()
+        return [_load(Floor, r) for r in rows]
+
+    def put_floor(self, floor: Floor) -> None:
+        if not floor.set_at:
+            floor.set_at = iso(now_utc())
+        with self._db() as db:
+            db.execute("DELETE FROM floor WHERE site = ?", (floor.site,))
+        self._put("floor", floor)
+
+    def delete_floor(self, site: str) -> bool:
+        with self._db() as db:
+            return bool(db.execute("DELETE FROM floor WHERE site = ?", (site,)).rowcount)
 
     # -- mailboxes -----------------------------------------------------------
 

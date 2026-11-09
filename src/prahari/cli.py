@@ -58,7 +58,8 @@ import sys
 import threading
 from pathlib import Path
 
-from prahari import __version__, indriyas, mailbox, mcp, recipe, templates, version, watches
+from prahari import (__version__, floors, indriyas, mailbox, mcp, recipe, templates, version,
+                     watches)
 from prahari.clock import Clock
 from prahari.dvara import Dvara, DvaraCaller, DvaraError, DvaraNotifier, DvaraRunner
 from prahari.http import (DEFAULT_PORT, Api, PrahariServer, inlet_token, public_inlet,
@@ -186,6 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="stop looking and decide on this indriya's readings instead "
                         "(what it remembered is kept when the indriya makes the same "
                         "call)")
+    p.add_argument("--look-itself", action="store_true", default=None, dest="look_itself",
+                   help="stop sensing its indriya and make the indriya's call itself "
+                        "again (what it remembered is kept; the indriya may slow down)")
     p.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("list", help="every watch")
@@ -295,6 +299,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      "sender would), and wait for its watches")
     i.add_argument("name")
     i.add_argument("value", help="a number or words, or a JSON object")
+    i.add_argument("--at", default=None, metavar="TIME",
+                   help="when it was measured (ISO 8601 with a zone), if not now")
     i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR")
     i.add_argument("--json", action="store_true", dest="json_out")
     for name, text in (("look", "read once, now, and wait"),
@@ -303,6 +309,22 @@ def build_parser() -> argparse.ArgumentParser:
         i = isub.add_parser(name, help=text)
         i.add_argument("name")
         i.add_argument("--json", action="store_true", dest="json_out")
+
+    p = sub.add_parser("floor", help="the least time between two calls to one site")
+    fsub = p.add_subparsers(dest="floor_command", required=True)
+    f = fsub.add_parser("list", help="every site's floor")
+    f.add_argument("--json", action="store_true", dest="json_out")
+    f = fsub.add_parser("set", help="call this site no more often than this (slows "
+                                    "what already calls it faster)")
+    f.add_argument("site", help="a host (api.open-meteo.com, its subdomains too) or a "
+                                "tool's name")
+    f.add_argument("every", help="15m, 1h ...")
+    f.add_argument("--why", default="", metavar="WORDS", help="what the site asks, in a "
+                                                              "few words")
+    f.add_argument("--json", action="store_true", dest="json_out")
+    f = fsub.add_parser("rm", help="back to the five-minute floor for this site")
+    f.add_argument("site")
+    f.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("hear", help="send the inlet something, here, and wait for it")
     p.add_argument("word")
@@ -556,6 +578,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
         return _mailbox(args, store, state)
     if cmd == "indriya":
         return _indriya(args, store, state)
+    if cmd == "floor":
+        return _floor(args, store)
     if cmd == "mcp":
         tools = mcp.Tools(store, state, _caller(state), person=args.person,
                           agent=args.agent, runner=args.runner, dvara=_dvara(),
@@ -613,13 +637,22 @@ def _dispatch(args, store: Store, state: Path) -> int:
             changes["routine_inputs"] = merged
         if args.wake == "":
             changes["wake"], changes["renew"] = "", {}
-        if args.sense:
+        if args.sense or args.look_itself:
             changes = {k: v for k, v in changes.items()
                        if k in ("name", "asked", "thing", "then")}
-            changes.update(sense=args.sense, home=_home())
-        watch = watches.update(store, watch.id, **changes)
-        print(json.dumps(watches.card(watch)) if args.json_out
-              else f"updated {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
+            changes.update(home=_home())
+            if args.sense:
+                changes["sense"] = args.sense
+            if args.look_itself:
+                changes["look_itself"] = True
+        notes: list[str] = []
+        watch = watches.update(store, watch.id, notes=notes, **changes)
+        if args.json_out:
+            print(json.dumps({**watches.card(watch), "notes": notes}))
+            return 0
+        print(f"updated {watch.id}: {watch.name} -- {watches.sentence(watch, store)}")
+        for line in notes:
+            print(f"  {line}")
         return 0
     if cmd == "pause":
         watch = watches.pause(store, watch.id)
@@ -637,8 +670,14 @@ def _dispatch(args, store: Store, state: Path) -> int:
                    f"{', '.join(watch.allow_tools)}")
         return 0
     if cmd == "rm":
-        watches.remove(store, watch.id)
-        print(json.dumps({"removed": watch.id}) if args.json_out else f"removed {watch.id}")
+        notes = []
+        watches.remove(store, watch.id, notes=notes)
+        if args.json_out:
+            print(json.dumps({"removed": watch.id, "notes": notes}))
+            return 0
+        print(f"removed {watch.id}")
+        for line in notes:
+            print(f"  {line}")
         return 0
     if cmd == "look":
         clock = _clock(state, store)
@@ -847,8 +886,10 @@ def _indriya(args, store: Store, state: Path) -> int:
             body = json.loads(args.value)
         except json.JSONDecodeError:
             body = None
-        text = json.dumps(body if isinstance(body, dict) else {"value": args.value},
-                          sort_keys=True, ensure_ascii=False)
+        sent = body if isinstance(body, dict) else {"value": args.value}
+        if args.at:
+            sent = {**sent, "at": args.at}
+        text = json.dumps(sent, sort_keys=True, ensure_ascii=False)
         clock = _clock(state, store)
         try:
             reading = clock.push(indriya, text)
@@ -861,7 +902,7 @@ def _indriya(args, store: Store, state: Path) -> int:
         for watch in store.watches(sense=indriya.id):
             for look in store.looks(watch.id, limit=1):
                 _print_look(look, with_watch=True)
-        return 0 if reading.outcome == "read" else 1
+        return 0 if reading.outcome in ("read", "late") else 1
     if sub == "add":
         if not args.check:
             raise watches.WatchError("an indriya needs --check TOOL (or --from-watch ID, "
@@ -1189,19 +1230,65 @@ def _print_indriya(indriya: Indriya, store: Store, full: bool = False) -> None:
     if using:
         print("          sensed by: " + ", ".join(f"{w.id} ({w.name})" for w in using))
     if full:
-        print(f"          check: {indriya.check['tool']} "
-              f"{json.dumps(indriya.check['args'])}")
+        if indriya.pushed:
+            print("          check: none, its value is sent in")
+        else:
+            print(f"          check: {indriya.check['tool']} "
+                  f"{json.dumps(indriya.check.get('args') or {})}")
         print(f"          pick: {json.dumps(indriya.pick) if indriya.pick else 'all'}"
-              f"   next reading: {_short(indriya.next_at)}")
+              f"   {'a value due by' if indriya.pushed else 'next reading'}: "
+              f"{_short(indriya.next_at)}")
+        if indriya.own_every and indriya.own_every != indriya.every:
+            print(f"          you set every {indriya.own_every}; a watch on it asked for "
+                  f"{indriya.every}, and it comes back when they go")
         if indriya.agent:
             print(f"          agent: {indriya.agent}   runner: {indriya.runner}")
         print(f"          made {_short(indriya.created_at)} (by {indriya.created_via}), "
               f"for {indriya.owner}")
 
 
+def _floor(args, store: Store) -> int:
+    """``prahari floor ...``: how often a site may be called, at least apart."""
+    sub = args.floor_command
+    if sub == "list":
+        found = store.floors()
+        if args.json_out:
+            print(json.dumps([f.as_dict() for f in found]))
+            return 0
+        if not found:
+            print(f"no floors: every site is called at most every "
+                  f"{recipe.duration_words(recipe.MIN_EVERY)} "
+                  "(prahari floor set SITE 15m --why ...)")
+        for floor in found:
+            print(f"{floor.site:<30} every {floor.every}"
+                  + (f"  ({floor.why})" if floor.why else ""))
+        return 0
+    if sub == "set":
+        floor, slowed = floors.put(store, args.site, args.every, args.why)
+        if args.json_out:
+            print(json.dumps({**floor.as_dict(), "slowed": slowed}))
+            return 0
+        print(f"{floors.words(floor)}")
+        for line in slowed:
+            print(f"  {line}")
+        return 0
+    if sub == "rm":
+        gone = floors.remove(store, args.site)
+        if args.json_out:
+            print(json.dumps({"removed": args.site if gone else None}))
+            return 0 if gone else 1
+        print(f"{args.site} is back to the floor every call has: once every "
+              f"{recipe.duration_words(recipe.MIN_EVERY)} at most"
+              if gone else f"no floor for {args.site}")
+        return 0 if gone else 1
+    raise AssertionError(sub)
+
+
 def _print_reading(reading: Reading) -> None:
     value = f"  {reading.value}" if reading.value else ""
-    print(f"{_short(reading.at)}  {reading.outcome:<9}{value}")
+    measured = (f"  (measured {_short(reading.measured_at)})"
+                if reading.measured_at and reading.measured_at != reading.at else "")
+    print(f"{_short(reading.at)}  {reading.outcome:<9}{value}{measured}")
     if reading.outcome != "read":
         if reading.why:
             print(f"    why: {reading.why}")

@@ -85,9 +85,9 @@ chat's words.
 
 ## Not here
 
-* **Readings made before this.** Their looks didn't record which
-  reading they judged, so those readings show no watches. Everything
-  from now on does.
+* ~~**Readings made before this.**~~ Their looks are matched to the
+  reading just before them, and shown as *matched by time*
+  ([12](12-a-pace-given-back.md#readings-from-before-looks-said-which)).
 * **A reading's watches for a fresh read.** A fresh read is handed to
   no watch ([07](07-one-call-by-itself.md#fresh-on-asking)), so it has
   none to show.

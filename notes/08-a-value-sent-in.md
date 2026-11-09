@@ -92,6 +92,9 @@ rest_command:
     payload: '{"value": "{{ states(''sensor.guestroom_temperature'') }}"}'
 ```
 
+   Optional: `"at": "{{ states.sensor.guestroom_temperature.last_updated.isoformat() }}"` beside the value, and its age is when the
+   sensor measured it ([12](12-a-pace-given-back.md#a-value-with-its-own-time)).
+
 4. Try it once: **Developer tools → Actions → RESTful Command:
    prahari_guestroom → Perform action**, then `prahari indriya readings
    guestroom-temp` shows it arrived.
@@ -155,9 +158,9 @@ guestroom watches sense it.
 
 ## Not here
 
-* **A value with its own time.** A sender that queued values while the
-  network was down gets each one stamped with when it *arrived*, not
-  when it was measured.
+* ~~**A value with its own time.**~~ `"at"` beside the value: its age
+  is when it was measured, and one measured before what is kept is
+  history, not news ([12](12-a-pace-given-back.md#a-value-with-its-own-time)).
 * **Several values in one push.** One indriya, one value. A sensor
   with temperature and humidity is two indriyas, or one with a pick
   that a sensing watch picks from (the humidity watch's trick in

@@ -28,10 +28,10 @@ the humidity is above 90 (once each time it becomes true)
 every 5 minutes, and a watch that senses has no pace of its own. So the
 person's own indriya speeds up to the fastest watch's pace. That is what
 the person asked for, and it still makes only one call each time. It
-never goes below the five-minute floor every call has. It doesn't slow
-down again when that watch is removed, because a slower pace is a choice
-someone else may have made. `prahari indriya edit NAME --every` is how to
-change it.
+never goes below the five-minute floor every call has (or its site's
+own floor). When that watch goes, the reading slows back down to the
+slowest pace still wanted, and `prahari indriya edit NAME --every` sets
+the pace it comes back to ([12](12-a-pace-given-back.md)).
 
 **SOMEONE ELSE'S READING IS THEIRS TO PACE.** A house indriya kept by
 someone else is used only if it already reads at least as often as the
@@ -201,15 +201,12 @@ call under that name is still refused.
 
 ## Not here
 
-* **Slowing back down.** An indriya sped up for a watch stays fast after
-  that watch is removed. Working out the slowest pace that still serves
-  everyone would mean keeping each watch's wish. A person who wants it
-  slower says so with `--every`.
-* **A floor for each site.** Every call has the same five-minute floor.
-  A weather service that asks for fifteen would need a per-site list,
-  which nobody has needed yet.
-* **Moving a watch back off a reading.** A watch that senses can't be
-  given its own call again. Remove it and make it anew with
-  `--look-itself`.
+* ~~**Slowing back down.**~~ Each watch's wish is kept now, and the
+  reading comes back to the slowest pace still wanted
+  ([12](12-a-pace-given-back.md#slower-when-the-need-goes)).
+* ~~**A floor for each site.**~~ `prahari floor set SITE 15m`
+  ([12](12-a-pace-given-back.md#a-floor-for-each-site)).
+* ~~**Moving a watch back off a reading.**~~ `prahari edit ID
+  --look-itself` ([12](12-a-pace-given-back.md#back-to-its-own-call)).
 * ~~**Values pushed in**~~ A pushed indriya
   ([notes/08](08-a-value-sent-in.md)).

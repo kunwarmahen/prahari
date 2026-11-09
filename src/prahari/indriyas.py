@@ -60,6 +60,19 @@ value is expected at least; nothing by then is a failed reading, said on
 each watch and counted, three in a row pause it and tell its owner. An
 automation that broke must not look like a temperature that never moved.
 
+AND SLOWS BACK DOWN WHEN THE NEED GOES. Each watch that sped a reading
+up keeps how often it asked (``wants_every``), and the reading keeps how
+often its owner set it (``own_every``). When such a watch is removed,
+ends, or goes back to looking itself, the reading comes back to the
+slowest pace that still serves everyone left: the owner's own, or the
+fastest wish still standing (``settle``). The owner's ``--every`` is the
+last word: wishes faster than it are lowered to it. A reading made
+before its owner's pace was kept is not slowed, since nobody knows what
+that pace was; its first speed-up remembers it.
+
+A SITE MAY ASK FOR MORE THAN FIVE MINUTES. A floor kept for the site
+(floors.py) holds a reading's pace, its speed-ups and its fresh reads.
+
 UNUSED, IT STOPS. Every reading a watch decides on, and every reader
 that asks for the value, marks it used (``used_at``). Thirty days with
 neither and the clock pauses it and tells its owner, as a watch with no
@@ -165,10 +178,13 @@ def create(store: Store, *, name: str, check=None, pick=None, every: str = "",
     if len(store.indriyas(owner=owner)) >= max_indriyas():
         raise WatchError(f"{owner} has {max_indriyas()} indriyas already; remove one first")
     # a pushed one's first deadline is one every from now; a read one reads now
+    if not pushed:
+        from prahari import floors
+        floors.check_pace(store, parts["check"], parts["every"], parts["name"])
     first = (now_utc() + recipe.every(parts["every"])) if pushed else now_utc()
     made = Indriya(id="", owner=owner, runner="direct" if pushed else runner,
                    agent=agent, created_via=created_via, next_at=iso(first),
-                   pushed=pushed, **parts)
+                   pushed=pushed, own_every=parts["every"], **parts)
     return store.add_indriya(made)
 
 
@@ -227,6 +243,17 @@ def update(store: Store, indriya_id: str, **changes) -> Indriya:
                     thing=given.get("thing", current.thing),
                     share=given.get("share", current.share), pushed=current.pushed)
     fields = {k: parts[k] for k in ("check", "pick", "every", "thing", "share")}
+    if not current.pushed and {"check", "every"} & set(given):
+        from prahari import floors
+        floors.check_pace(store, parts["check"], parts["every"], current.name)
+    if "every" in given:
+        # THE OWNER'S WORD IS THE LAST: it is the pace to come back to, and
+        # a watch's wish faster than it is lowered to it
+        fields["own_every"] = parts["every"]
+        new = recipe.every(parts["every"])
+        for watch in store.watches(sense=current.id):
+            if watch.wants_every and recipe.every(watch.wants_every) < new:
+                store.update(watch.id, wants_every=parts["every"])
     if {"check", "pick"} & set(given):
         fields.update(value="", stored="", read_at=None, trouble=0,
                       next_at=iso(now_utc() + recipe.every(parts["every"])
@@ -317,18 +344,58 @@ def is_own(indriya: Indriya, person: str, home: set[str] | None = None) -> bool:
 
 def keep_up(store: Store, indriya: Indriya, every: str) -> str:
     """The FASTEST NEED: a watch asked to look every ``every`` now goes by
-    this indriya, so it reads at least that often. Returns what changed,
-    in words ("" for nothing)."""
+    this indriya, so it reads at least that often -- but not faster than
+    its site's floor. Returns what changed, in words ("" for nothing)."""
+    from prahari import floors
+
+    asked = recipe.every(every)
+    every = floors.at_floor(store, indriya.check, every.strip())
     wanted, now = recipe.every(every), recipe.every(indriya.every)
+    capped = ""
+    if wanted > asked:
+        _, floor = floors.floor_for(store, indriya.check)
+        capped = (f"{indriya.name} reads no more often than every "
+                  f"{recipe.duration_words(wanted)}, not every "
+                  f"{recipe.duration_words(asked)}: {floors.words(floor)}")
+    if not indriya.own_every:
+        # the pace to come back to, remembered before it is first changed
+        store.update_indriya(indriya.id, own_every=indriya.every)
     if wanted >= now:
-        return ""
-    store.update_indriya(indriya.id, every=every.strip())
+        return capped
+    store.update_indriya(indriya.id, every=every)
     due = from_iso(indriya.next_at)
     soon = now_utc() + wanted
     if due is None or due > soon:
         store.update_indriya(indriya.id, next_at=iso(soon))
-    return (f"{indriya.name} now reads every {recipe.duration_words(wanted)} (it read "
+    said = (f"{indriya.name} now reads every {recipe.duration_words(wanted)} (it read "
             f"every {recipe.duration_words(now)}), as often as this watch asked")
+    return f"{said}; {capped}" if capped else said
+
+
+def settle(store: Store, indriya: Indriya) -> str:
+    """SLOWER WHEN THE NEED GOES. The slowest pace that still serves
+    everyone: the owner's own, or the fastest wish of a watch still on it
+    (removed and ended watches don't count; paused ones do, since they
+    come back). Only ever slows; speeding up is ``keep_up``'s. Returns what
+    changed, in words ("" for nothing)."""
+    from prahari import floors
+
+    current = store.get_indriya(indriya.id)
+    if current is None or current.pushed or not current.own_every:
+        return ""
+    wishes = [w.wants_every for w in store.watches(sense=current.id)
+              if w.state != "ended" and w.wants_every]
+    target = min([current.own_every, *wishes], key=recipe.every)
+    target = floors.at_floor(store, current.check, target)
+    before = recipe.every(current.every)
+    if recipe.every(target) <= before:
+        return ""
+    store.update_indriya(current.id, every=target)
+    why = ("as you set it" if target == current.own_every
+           else "as often as the fastest watch still on it asks")
+    return (f"{current.name} now reads every "
+            f"{recipe.duration_words(recipe.every(target))} (it read every "
+            f"{recipe.duration_words(before)}), {why}")
 
 
 def used(store: Store, indriya: Indriya) -> None:
@@ -376,12 +443,16 @@ def fresh(store: Store, caller, indriya: Indriya, too_old: timedelta | None) -> 
     if indriya.state != "active":
         return indriya, (f"not read again: {indriya.name} is paused "
                          f"({indriya.paused_because or 'by hand'})")
+    from prahari import floors
+
     last = store.readings(indriya.id, limit=1)
     tried = from_iso(last[0].at) if last else None
-    if tried is not None and now - tried < FRESH_FLOOR:
+    floor, site = floors.floor_for(store, indriya.check)
+    floor = max(floor, FRESH_FLOOR)
+    if tried is not None and now - tried < floor:
         return indriya, (f"not read again: it was read {age_words(last[0].at)}, and a "
-                         f"reading is not made again within "
-                         f"{recipe.duration_words(FRESH_FLOOR)}")
+                         f"reading is not made again within {_span(floor)}"
+                         + (f" ({floors.words(site)})" if site else ""))
     reading, _ = take(caller, indriya, now)
     reading.why = f"Asked for fresh by a reader. {reading.why}"
     reading.came_by = "asked"
@@ -392,6 +463,12 @@ def fresh(store: Store, caller, indriya: Indriya, too_old: timedelta | None) -> 
     store.update_indriya(indriya.id, value=reading.value, stored=reading.stored,
                          read_at=reading.at)
     return store.get_indriya(indriya.id) or indriya, "read again just now, as asked"
+
+
+def _span(step: timedelta) -> str:
+    """"5 minutes", "an hour": a span after "within"."""
+    words = recipe.duration_words(step)
+    return words if words[0].isdigit() else ("an " if words == "hour" else "a ") + words
 
 
 def pause(store: Store, indriya: Indriya, because: str = "paused by you") -> Indriya:
@@ -474,6 +551,13 @@ def card(indriya: Indriya, store: Store | None = None) -> dict:
     return data
 
 
+#: A look made before looks said which reading they judged is matched to
+#: the reading just before it, no further back than this. A reading's
+#: looks start when its call is done -- a minute or more through Dvara --
+#: and one indriya never reads twice at once, so the reading just before
+#: a look is the one it judged.
+MATCH_WINDOW = timedelta(minutes=15)
+
 #: How a reading came, in words.
 CAME_WORDS = {"clock": "on its clock", "now": "read now, by hand",
               "asked": "asked for fresh by a reader", "pushed": "sent in",
@@ -493,12 +577,15 @@ def history(store: Store, indriya: Indriya, limit: int = 20,
     found = store.readings(indriya.id, limit=max(1, min(int(limit), 500)))
     decided = store.decided_on([r.id for r in found])
     names = {w.id: w for w in store.watches(sense=indriya.id)}
+    guessed = _matched_by_time(store, found, decided, list(names))
     out = []
     for reading in found:
         row = reading.as_dict()
         row["came_words"] = CAME_WORDS.get(reading.came_by, reading.came_by)
         mine, others = [], 0
-        for look in decided.get(reading.id, []):
+        by_time = guessed.get(reading.id, [])
+        row["matched_by_time"] = bool(by_time)
+        for look in decided.get(reading.id, []) or by_time:
             watch = names.get(look.watch) or store.get(look.watch)
             if watch is not None and people is not None and watch.owner not in people:
                 others += 1
@@ -506,10 +593,34 @@ def history(store: Store, indriya: Indriya, limit: int = 20,
             mine.append({"watch": look.watch, "name": watch.name if watch else look.watch,
                          "outcome": look.outcome, "why": look.why, "value": look.value,
                          "found": look.found, "turn": look.turn,
-                         "notified": look.notified})
+                         "notified": look.notified, "matched_by_time": bool(by_time)})
         row["decided"] = mine
         row["others"] = others
         out.append(row)
+    return out
+
+
+def _matched_by_time(store: Store, found: list, decided: dict,
+                     watch_ids: list[str]) -> dict[str, list]:
+    """READINGS MADE BEFORE LOOKS SAID WHICH ONE THEY JUDGED. A look that a
+    reading was handed to starts within seconds of it, marked as made on
+    an indriya; one with no reading named is matched to the reading just
+    before it, no more than ``MATCH_WINDOW`` back. Only for the history:
+    nothing is written, and each one is shown as matched by time."""
+    bare = [r for r in found if not decided.get(r.id) and r.came_by != "asked"]
+    if not bare or not watch_ids:
+        return {}
+    stamps = sorted((from_iso(r.at), r) for r in bare)
+    until = iso(stamps[-1][0] + MATCH_WINDOW)
+    out: dict[str, list] = {}
+    for look in store.unmarked_looks(watch_ids, iso(stamps[0][0]), until):
+        started = from_iso(look.started_at)
+        best = None
+        for at, reading in stamps:
+            if at <= started and started - at <= MATCH_WINDOW:
+                best = reading
+        if best is not None:
+            out.setdefault(best.id, []).append(look)
     return out
 
 
@@ -520,7 +631,10 @@ def history_lines(rows: list[dict], *, full: bool = False, when=None) -> list[st
     for row in rows:
         value = f" {row['value']}" if row.get("value") else ""
         at = when(row["at"]) if when else row["at"]
-        lines.append(f"{at}  {row['outcome']}{value}  ({row['came_words']})")
+        measured = ""
+        if row.get("measured_at") and row["measured_at"] != row["at"]:
+            measured = f", measured {when(row['measured_at']) if when else row['measured_at']}"
+        lines.append(f"{at}  {row['outcome']}{value}  ({row['came_words']}{measured})")
         if row["outcome"] != "read" or full:
             lines.append(f"    why: {row.get('why') or ''}")
             if row.get("detail"):
@@ -529,7 +643,8 @@ def history_lines(rows: list[dict], *, full: bool = False, when=None) -> list[st
             lines.append(f"    came in: {' '.join(row['said'].split())[:300]}")
         for look in row["decided"]:
             told = " -- told you" if look.get("notified") else ""
-            lines.append(f"    → {look['name']}: {look['outcome']}{told}")
+            matched = " (matched by time)" if look.get("matched_by_time") else ""
+            lines.append(f"    → {look['name']}: {look['outcome']}{told}{matched}")
             if full and look.get("why"):
                 lines.append(f"        {look['why']}")
         if row.get("others"):

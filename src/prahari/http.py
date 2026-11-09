@@ -237,7 +237,7 @@ class Api:
                 return 200, {"removed": watch.id}
             if len(parts) == 2 and method == "PATCH":
                 # who counts as this person is Prahari's to say, never a body's
-                body = {k: v for k, v in body.items() if k != "home"}
+                body = {k: v for k, v in body.items() if k not in ("home", "notes")}
                 return 200, watches.card(watches.update(self.store, watch.id, **body),
                                          self.store)
             if method == "POST" and action == "pause":

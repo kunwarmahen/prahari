@@ -76,7 +76,7 @@ import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from prahari import recipe
@@ -120,6 +120,9 @@ PHONE_TOOL = "mcp__sparsh__open_url"
 SAID_SHOWN = 200
 #: How much of what the check answered is kept with each look, for its details.
 SAID_KEPT = 4000
+#: A sender's clock may run a little ahead of this one; a measured time
+#: further ahead than this isn't believed.
+AHEAD = timedelta(minutes=5)
 #: After a refusal, the next look comes this soon at the latest: a daily
 #: watch that met a bad moment shouldn't wait a day to try again.
 REFUSED_AGAIN = timedelta(hours=1)
@@ -251,6 +254,12 @@ class Clock:
         if current is None or current.state != "active":
             return
         self.store.update(watch.id, state="ended", ended_at=iso(self.now()), next_at=None)
+        if watch.sense:
+            # a reading sped up for this watch slows back down
+            from prahari.indriyas import settle
+            sensed = self.store.get_indriya(watch.sense)
+            if sensed is not None:
+                settle(self.store, sensed)
         self._send(watch, "\n".join([
             f"Ended: {watch.name}", why,
             *([f'You asked: "{watch.asked}"'] if watch.asked else []),
@@ -335,10 +344,19 @@ class Clock:
     def push(self, indriya: Indriya, text: str) -> Reading:
         """A value sent in for a pushed indriya: picked, kept, and handed to
         its watches, as a reading the clock took would be. Its deadline
-        starts again from now."""
+        starts again from now.
+
+        A VALUE MAY SAY WHEN IT WAS MEASURED (``"at"``): a sender that
+        queued values while the network was down sends each with its own
+        time. That time is the value's age, and ``at`` stays when it came.
+        OLDER THAN WHAT IS KEPT IS HISTORY, NOT NEWS: a value measured
+        before the one already kept is written in the history as ``late``,
+        and neither kept nor handed to the watches -- a queue arriving out
+        of order must not fire a watch on the past."""
         now = self.now()
+        when, unread = measured(text, now)
         reading = Reading(id="", indriya=indriya.id, at=iso(now), said=text[:SAID_KEPT],
-                          came_by="pushed")
+                          came_by="pushed", measured_at=iso(when) if when else None)
         picked = recipe.apply(indriya.pick, text)
         if picked.found and picked.shown().strip().lower() in NO_VALUE:
             # A SENDER THAT SAYS IT DOESN'T KNOW. Home Assistant sends
@@ -350,7 +368,15 @@ class Clock:
             reading.detail = f"sent {picked.shown()!r}"
         elif picked.found:
             reading.value, reading.stored = picked.shown(), picked.stored()
-            reading.why = f"Pushed in: {reading.value}"
+            reading.why = (f"Pushed in: {reading.value}"
+                           + (f", measured {reading.measured_at}" if when else "")
+                           + (f"; {unread}" if unread else ""))
+            kept = from_iso((self.store.get_indriya(indriya.id) or indriya).read_at)
+            if when is not None and kept is not None and when < kept:
+                reading.outcome = "late"
+                reading.why = (f"Pushed in: {reading.value}, measured {reading.measured_at}, "
+                               f"before the value already kept (measured {iso(kept)}): "
+                               "kept in the history only, and not handed to the watches")
         else:
             reading.outcome = "broken"
             reading.why = ("Something was pushed in, but the pick found nothing in it; "
@@ -360,7 +386,10 @@ class Clock:
         self.store.update_indriya(indriya.id, next_at=iso(now + recipe.every(indriya.every)))
         if reading.outcome == "read":
             self.store.update_indriya(indriya.id, value=reading.value, stored=reading.stored,
-                                      read_at=reading.at, trouble=0)
+                                      read_at=reading.measured_at or reading.at, trouble=0)
+        elif reading.outcome == "late":
+            self.store.update_indriya(indriya.id, trouble=0)     # its sender works
+            return reading
         else:
             self._count(indriya, reading)
         self._pass_down(indriya, reading, text)
@@ -906,6 +935,35 @@ def _for(step: timedelta) -> str:
     """"for an hour", "for 2 hours": a span as a sentence says it."""
     words = recipe.duration_words(step)
     return words if words[0].isdigit() else ("an " if words == "hour" else "a ") + words
+
+
+def measured(text: str, now: datetime) -> tuple[datetime | None, str]:
+    """When a pushed value says it was measured: ``"at"`` in its body, as
+    ISO 8601 with a zone or seconds since 1970. Returns the time (None for
+    none, or one not believed) and, when one was given but not used, why
+    -- the value then counts as measured when it arrived."""
+    try:
+        body = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None, ""
+    if not isinstance(body, dict) or body.get("at") in (None, ""):
+        return None, ""
+    raw = body["at"]
+    try:
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            when = datetime.fromtimestamp(raw, UTC)
+        else:
+            when = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                return None, (f"its time {raw!r} has no zone, so it counts as measured "
+                              "when it arrived")
+    except (ValueError, OverflowError, OSError):
+        return None, (f"its time {raw!r} isn't one I can read (ISO 8601 with a zone, or "
+                      "seconds since 1970), so it counts as measured when it arrived")
+    if when > now + AHEAD:
+        return None, (f"its time ({iso(when)}) is ahead of this computer's clock, so it "
+                      "counts as measured when it arrived")
+    return when, ""
 
 
 def take(caller: Caller, indriya: Indriya, now: datetime) -> tuple[Reading, str]:
