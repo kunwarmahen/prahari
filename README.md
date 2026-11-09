@@ -338,6 +338,13 @@ prahari indriya add guestroom-temp --pushed --thing "the guestroom temperature i
 prahari indriya push guestroom-temp 61.5      # try it here, as the sender would
 ```
 
+Home Assistant sends it with a `rest_command` posting `{"value": "{{
+states('sensor.guestroom_temperature') }}"}`, from an automation that
+runs on every change *and* every 20 minutes. The whole setup, with the
+key kept in `secrets.yaml` and a first try from Developer tools, is in
+[notes/08](notes/08-a-value-sent-in.md#from-home-assistant) (and,
+step by step, in Sarathi's tutorial).
+
 `--every` is how often a value is *expected*. Nothing by then is a failed
 reading, said on each watch; `unavailable` or `unknown` (Home Assistant's
 words for a sensor that dropped off) is too, and three in a row pause it

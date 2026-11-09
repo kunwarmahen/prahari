@@ -64,28 +64,54 @@ says so (409), because that pause was someone's choice.
 
 ## From Home Assistant
 
-The address and key come from `prahari inlet` (or, for someone else in
-the house, `prahari inlet --for NAME`; their agent's `create_indriya`
-answer has them too). In Home Assistant's `configuration.yaml`:
+Sarathi's tutorial (Step 8, *A number Home Assistant already knows*)
+walks through this a step at a time, with what to do when it doesn't
+arrive. In short:
+
+1. Make the reading: `prahari indriya add guestroom-temp --pushed
+   --thing "the guestroom temperature in °F" --every 30m`.
+2. Get the address and key: `prahari inlet` (for someone else in the
+   house, `prahari inlet --for NAME`; their agent's `create_indriya`
+   answer has them too). The reading's address is the inlet's with
+   `indriya/guestroom-temp` for `WORD`, and `?key=…` on the end.
+3. In Home Assistant, keep that address in `secrets.yaml`, since it
+   holds the key:
 
 ```yaml
+# secrets.yaml
+prahari_guestroom_url: "http://linux-al-ml-beast.singhs:8782/inlet/indriya/guestroom-temp?key=YOUR_INLET_KEY"
+```
+
+```yaml
+# configuration.yaml (then check the configuration, and restart)
 rest_command:
   prahari_guestroom:
-    url: "http://linux-al-ml-beast.singhs:8782/inlet/indriya/guestroom-temp?key=YOUR_INLET_KEY"
+    url: !secret prahari_guestroom_url
     method: POST
     content_type: "application/json"
     payload: '{"value": "{{ states(''sensor.guestroom_temperature'') }}"}'
-
-automation:
-  - alias: "Guestroom temperature to Prahari"
-    triggers:
-      - trigger: state
-        entity_id: sensor.guestroom_temperature
-      - trigger: time_pattern
-        minutes: "/20"          # also every 20 minutes, so a steady room isn't "silent"
-    actions:
-      - action: rest_command.prahari_guestroom
 ```
+
+4. Try it once: **Developer tools → Actions → RESTful Command:
+   prahari_guestroom → Perform action**, then `prahari indriya readings
+   guestroom-temp` shows it arrived.
+5. The automation (**Settings → Automations & scenes → Create → Edit in
+   YAML**):
+
+```yaml
+alias: Guestroom temperature to Prahari
+triggers:
+  - trigger: state
+    entity_id: sensor.guestroom_temperature
+  - trigger: time_pattern
+    minutes: "/20"          # also every 20 minutes, so a steady room isn't "silent"
+actions:
+  - action: rest_command.prahari_guestroom
+mode: queued
+```
+
+What Home Assistant's log says back: `401` is a wrong key, `404` a name
+that isn't this key's person's, `409` a reading paused by hand.
 
 The second trigger matters. A room that holds at 66 °F for two hours
 sends nothing on *state change*, and that would look like silence. So
