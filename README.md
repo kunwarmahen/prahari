@@ -688,7 +688,7 @@ is on it, and every day and time their watches say is said on it.
 | `preview_watch` | looks ONCE (only with a tool that reads) and says what it sees, with the start of the tool's answer, and reads back `asked` as the watch's messages will say it |
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
-| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches); on a call an indriya already makes it senses that indriya and says so (`look_itself: true` for its own call) |
+| `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches); on a call an indriya already makes it senses that indriya and says so (`look_itself: true` for its own call); `routine` starts one of the person's Vidhi routines when it fires, instead of `then` |
 | `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
@@ -742,6 +742,23 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A knock only says look** | a watch woken by its word looks with its own check; the knock's body is never read |
 
 ### Where news goes
+
+**Then, a routine.** Instead of `--then`, a watch can start one of the
+person's routines in [Vidhi](https://github.com/kunwarmahen/vidhi):
+steps they drew once, which may fetch more, ask the model, and ask them
+yes or no before acting.
+
+```bash
+prahari add "Porch is cold" --sense porch-temp --when 'below 60' --routine coat-check
+```
+
+When it fires, Prahari runs `vidhi start coat-check --as <the watch's
+person> --by prahari:<id> --found 58`. What it saw goes in as the
+routine's `found` input when it has one: the value itself, or the new
+items for a `new` watch. The routine tells the person what it did, so
+the watch sends nothing of its own; one that didn't start is told, with
+why. A watch either asks the agent or starts a routine, never both
+([notes/10](notes/10-then-a-routine.md)).
 
 With `PRAHARI_DVARA_URL` set, a fire is sent to the watch's person
 through Dvara (`POST /notify`): their Telegram, Dvara's web chat,
@@ -822,11 +839,13 @@ src/prahari/
 │                readings, handed to each watch that senses it; a watch's
 │                days (it ends, asks, is removed); each look's why and
 │                what its check answered ([notes/05](notes/05-a-look-says-why.md)); the inlet's
-│                events; firing: a line that says what it is for, or a
-│                then-turn with what was found marked as outside text
+│                events; firing: a line that says what it is for, a
+│                then-turn with what was found marked as outside text, or
+│                a routine started ([notes/10](notes/10-then-a-routine.md))
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
 │                for word), the yes/no for ask, the then-turn (Samay's
-│                direct road); Roads, each watch's look on its own road
+│                direct road); Roads, each watch's look on its own road;
+│                start_routine: `vidhi start` as the watch's person
 ├── dvara.py     the Dvara road: /call for a look as the person, /notify for
 │                news, /message for a turn as the person (came_by prahari,
 │                the watch's name as label, for the phone's log).

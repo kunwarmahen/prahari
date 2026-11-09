@@ -141,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "(by default it senses that indriya instead)")
     p.add_argument("--then", default="", metavar="PROMPT",
                    help="what the agent is asked when it fires (default: just tell you)")
+    p.add_argument("--routine", default="", metavar="NAME",
+                   help="instead of --then: start this routine (Vidhi) when it fires, "
+                        "with what it saw as the routine's input found")
     p.add_argument("--agent", default="", metavar="DIR|NAME",
                    help="the agent package that looks and works (Dvara road: its name)")
     p.add_argument("--runner", choices=("direct", "dvara"), default="direct")
@@ -162,6 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--asked", default=None, metavar="WORDS")
     p.add_argument("--thing", default=None, metavar="WORDS")
     p.add_argument("--then", default=None)
+    p.add_argument("--routine", default=None, metavar="NAME",
+                   help="start this routine (Vidhi) when it fires ('' for none)")
     p.add_argument("--keep", action="store_true", default=None,
                    help="keep it going: an ended watch looks again, and an open-ended "
                         "one stops asking for 30 days")
@@ -440,6 +445,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
             pick=parts["pick"], when=parts["when"],
             every=parts["every"] or ("" if args.listen or sensed else "1h"),
             wake=parts["wake"] or "", renew=parts["renew"], then=args.then,
+            routine=args.routine,
             asked=args.asked, thing=args.thing, starts=parts["starts"], ends=parts["ends"],
             stop=parts["stop"], owner=args.as_actor or watches.LOCAL_OWNER, runner=args.runner,
             agent=args.agent, allow_tools=args.allow_tools, max_per_day=args.max_per_day,
@@ -564,7 +570,7 @@ def _dispatch(args, store: Store, state: Path) -> int:
     if cmd == "edit":
         parts = _recipe(args, pick_now=watch.pick)
         changes = {k: v for k, v in parts.items() if v is not None}
-        for key in ("name", "asked", "thing", "then", "max_per_day", "keep"):
+        for key in ("name", "asked", "thing", "then", "max_per_day", "keep", "routine"):
             if getattr(args, key) is not None:
                 changes[key] = getattr(args, key)
         if args.wake == "":
@@ -1053,8 +1059,11 @@ def _print_watch(watch: Watch, store: Store, full: bool = False) -> None:
         print(f"          asked: \"{watch.asked}\"")
     print(f"          {watches.sentence(watch, store)}"
           + (f"  (times on {watch.zone})" if watch.zone else ""))
-    print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
-          if full or watch.then else "          then: tells you what it saw")
+    if watch.routine:
+        print(f"          then: starts the routine {watch.routine} (Vidhi)")
+    else:
+        print(f"          then: {watch.then if watch.then else 'tells you what it saw'}"
+              if full or watch.then else "          then: tells you what it saw")
     if watch.paused_because:
         print(f"          paused: {watch.paused_because}")
     last = store.looks(watch.id, limit=1)

@@ -102,6 +102,10 @@ _RENEW = {"type": "object", "description": (
     '"personal", "topic": "projects/<project>/topics/<name>"}}. Only when the person '
     "has set up that topic.")}
 
+_ROUTINE = {"type": "string", "description": (
+    "Instead of then: the name of one of the person's routines (Vidhi's "
+    "list_routines) to start when it fires, as them, with what it saw as the "
+    "routine's input found. The routine tells the person itself.")}
 _STARTS = {"type": "string", "description": (
     "When it starts looking, if not now: ISO 8601 with the person's offset "
     "(\"2026-10-31T07:00-04:00\"). \"Keep an eye on my flight tomorrow\" starts "
@@ -192,7 +196,7 @@ TOOLS: list[dict] = [
              "true only when the person wants this watch to make its own call even "
              "though an indriya already makes it (by default it senses that one)")},
          "wake": _WAKE, "renew": _RENEW,
-         "then": {"type": "string"},
+         "then": {"type": "string"}, "routine": _ROUTINE,
          "allow_tools": {"type": "array", "items": {"type": "string"}},
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200,
                          "description": "the most times it may fire in a day "
@@ -220,7 +224,7 @@ TOOLS: list[dict] = [
              "stops calling and decides on each reading. Give it alone (a new name "
              "may go with it); what it remembered is kept when the indriya makes "
              "the same call")},
-         "then": {"type": "string"},
+         "then": {"type": "string"}, "routine": _ROUTINE,
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
          "required": ["id"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False}},
@@ -455,7 +459,8 @@ class Tools:
             sense=str(args.get("sense") or ""), home=self.home,
             when=args.get("when"), every=str(args.get("every") or ""),
             wake=str(args.get("wake") or ""), renew=args.get("renew"),
-            then=str(args.get("then") or ""), owner=self.person, runner=self.runner,
+            then=str(args.get("then") or ""), routine=str(args.get("routine") or ""),
+            owner=self.person, runner=self.runner,
             agent=self.agent, allow_tools=[str(g) for g in allow],
             max_per_day=int(args.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY),
             created_via="agent", dvara=self.dvara if self.runner == "dvara" else None,
@@ -471,7 +476,8 @@ class Tools:
     def _update_watch(self, args: dict) -> str:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
                                         "every", "then", "max_per_day", "wake", "renew",
-                                        "starts", "ends", "stop", "keep", "sense")
+                                        "starts", "ends", "stop", "keep", "sense",
+                                        "routine")
                    if k in args}
         if changes.get("sense"):
             changes["home"] = self.home

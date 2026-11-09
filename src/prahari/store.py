@@ -112,6 +112,9 @@ class Watch:
     every: str = ""
     #: What the agent is asked when it fires; "" to just tell the person.
     then: str = ""
+    #: A routine (Vidhi) it starts when it fires, instead of a then-turn:
+    #: its name, run as the watch's person. "" for none.
+    routine: str = ""
     runner: str = "direct"
     agent: str = ""                  # package dir (direct) or name (dvara)
     #: Tools the then-turn may use without asking.
@@ -390,7 +393,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                     ("stop", "TEXT NOT NULL DEFAULT '{}'"), ("ended_at", "TEXT"),
                     ("kept_at", "TEXT"), ("still_asked_at", "TEXT"),
                     ("zone", "TEXT NOT NULL DEFAULT ''"),
-                    ("sense", "TEXT NOT NULL DEFAULT ''")),
+                    ("sense", "TEXT NOT NULL DEFAULT ''"),
+                    ("routine", "TEXT NOT NULL DEFAULT ''")),
           "look": (("why", "TEXT NOT NULL DEFAULT ''"),
                    ("said", "TEXT NOT NULL DEFAULT ''"),
                    ("reading", "TEXT NOT NULL DEFAULT ''")),

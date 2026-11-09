@@ -210,7 +210,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
            wait: int = DEFAULT_WAIT, time_limit: int = DEFAULT_TIME_LIMIT,
            max_per_day: int = DEFAULT_MAX_PER_DAY, created_via: str = "cli",
            dvara=None, sense: str = "", home: set[str] | None = None,
-           look_itself: bool = False, notes: list[str] | None = None) -> Watch:
+           look_itself: bool = False, notes: list[str] | None = None,
+           routine: str = "") -> Watch:
     """A new watch. ``notes`` gathers what Prahari decided on the person's
     behalf, in words, for the caller to say: a watch on a call an indriya
     already makes senses it instead (``look_itself`` says no)."""
@@ -222,7 +223,7 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
                           stop=stop, zone=zone, owner=owner, runner=runner, agent=agent,
                           allow_tools=allow_tools, wait=wait, time_limit=time_limit,
                           max_per_day=max_per_day, created_via=created_via, dvara=dvara,
-                          sense=reader.id, home=home, notes=notes)
+                          sense=reader.id, home=home, notes=notes, routine=routine)
     sensed = None
     if sense:
         from prahari import indriyas
@@ -241,6 +242,7 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
             f"{owner} already has a watch on exactly this: {twin.id} ({twin.name}) -- "
             f"{sentence(twin, store)}. Mend that one (its test, how often) instead of making "
             "a second; ask the person first")
+    routine = _routine(routine, then)
     if runner not in RUNNERS:
         raise WatchError(f"runner is direct or dvara, not {runner!r}")
     if runner == "dvara":
@@ -264,7 +266,8 @@ def create(store: Store, *, name: str = "", check=None, listen: str = "", pick=N
     grants = [str(g).strip() for g in allow_tools or [] if str(g).strip()]
     if len(store.watches(owner=owner)) >= max_watches():
         raise WatchError(f"{owner} has {max_watches()} watches already; delete one first")
-    watch = Watch(id="", owner=owner, then=(then or "").strip(), runner=runner,
+    watch = Watch(id="", owner=owner, then=(then or "").strip(), routine=routine,
+                  runner=runner,
                   agent=agent, allow_tools=grants, wait=int(wait),
                   time_limit=int(time_limit), max_per_day=int(max_per_day),
                   created_via=created_via, **parts)
@@ -402,7 +405,7 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     watch = find(store, watch_id, owner=owner)
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
                "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
-               "keep", "sense", "home"}
+               "keep", "sense", "home", "routine"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
@@ -467,6 +470,10 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
         fields["next_at"] = iso(min(due, soon) if due else soon)
     if "then" in given:
         fields["then"] = str(given["then"]).strip()
+    if "routine" in given or "then" in given:
+        fields["routine"] = _routine(
+            str(given.get("routine", "" if fields.get("then") else watch.routine)),
+            fields.get("then", watch.then))
     if "allow_tools" in given:
         grants = given["allow_tools"]
         if not isinstance(grants, list):
@@ -607,12 +614,33 @@ def push_words(wake: str, renew: dict | None) -> str:
     return said
 
 
+#: A routine's name, as Vidhi takes it.
+ROUTINE_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
+
+
+def _routine(routine: str, then: str) -> str:
+    """A watch starts a routine OR asks the agent, never both: a fire that
+    did two different things would leave the person unable to say which
+    one did what."""
+    routine = (routine or "").strip()
+    if not routine:
+        return ""
+    if not ROUTINE_RE.match(routine):
+        raise WatchError(f"{routine!r} is not a routine's name (morning-brief)")
+    if (then or "").strip():
+        raise WatchError("a watch either asks the agent (then) or starts a routine "
+                         "(routine), not both")
+    return routine
+
+
 def card(watch: Watch, store: Store | None = None) -> dict:
     """A watch as a page or a program reads it: itself, in words, and its
     last look."""
     data = watch.as_dict()
     data["sentence"] = sentence(watch, store)
     data["does"] = (f"Then it asks the agent: {watch.then}" if watch.then
+                    else f"Then it starts the routine {watch.routine} (Vidhi), with "
+                         "what it saw as {{inputs.found}}" if watch.routine
                     else "You get a line saying what it saw; no model is asked")
     if store is not None:
         last = store.looks(watch.id, limit=1)

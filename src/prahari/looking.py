@@ -329,6 +329,52 @@ class DirectRunner:
             refused=[str(r) for r in data.get("refused") or []])
 
 
+# -- a routine, started -------------------------------------------------------------
+
+
+def find_vidhi() -> list[str]:
+    """``$PRAHARI_VIDHI``, else ``vidhi`` beside this Python, else on PATH."""
+    configured = os.environ.get("PRAHARI_VIDHI", "").strip()
+    if configured:
+        return shlex.split(configured)
+    beside = Path(sys.executable).parent / "vidhi"
+    if beside.exists():
+        return [str(beside)]
+    found = shutil.which("vidhi")
+    if found:
+        return [found]
+    raise RunnerMissing("cannot find vidhi: set PRAHARI_VIDHI to the command that "
+                        "starts it")
+
+
+def start_routine(watch: Watch, found: str, *, command: list[str] | None = None
+                  ) -> tuple[bool, str]:
+    """(started, run id or why not). STARTING IS ALL PRAHARI DOES: ``vidhi
+    start`` adds a run, as the watch's own person, and Vidhi's server runs
+    it and tells them. What the watch saw goes in as the routine's
+    ``found`` input, when it has one."""
+    try:
+        argv = [*(command or find_vidhi()), "start", watch.routine,
+                f"--as={watch.owner}", f"--by=prahari:{watch.id}",
+                f"--found={found[:2000]}", "--json"]
+    except RunnerMissing as exc:
+        return False, str(exc)
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=60,
+                              stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"vidhi didn't answer ({type(exc).__name__})"
+    lines = (done.stdout or "").strip().splitlines()
+    try:
+        data = json.loads(lines[-1]) if lines else {}
+    except json.JSONDecodeError:
+        data = {}
+    if done.returncode != 0 or not data.get("id"):
+        return False, (data.get("error") or _tail(done.stderr).removeprefix("error: ")
+                       or "vidhi said nothing")
+    return True, str(data["id"])
+
+
 # -- one process -------------------------------------------------------------------
 
 

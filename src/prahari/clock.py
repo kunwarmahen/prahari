@@ -81,6 +81,7 @@ from typing import Protocol
 
 from prahari import recipe
 from prahari.looking import Asker, Called, Caller, TurnResult
+from prahari.looking import start_routine as looking_start_routine
 from prahari.store import Indriya, Look, Reading, Store, Watch, from_iso, iso, now_utc
 
 #: An ended watch is kept this long, then removed with its looks.
@@ -148,8 +149,12 @@ class Clock:
                  now: Callable[[], datetime] = now_utc, workers: int = WORKERS,
                  on_record: Callable[[Watch, Look], None] | None = None,
                  home: set[str] | None = None,
-                 on_reading: Callable[[Indriya, Reading], None] | None = None) -> None:
+                 on_reading: Callable[[Indriya, Reading], None] | None = None,
+                 start_routine: Callable[[Watch, str], tuple[bool, str]] | None = None
+                 ) -> None:
         self.store = store
+        #: How a watch with a routine starts it (looking.start_routine: Vidhi).
+        self.start_routine = start_routine or looking_start_routine
         self.caller = caller
         self.runners = runners
         self.asker = asker
@@ -787,6 +792,22 @@ class Clock:
             self._done(watch, look)
             return False
         look.outcome = "fired"
+        if watch.routine:
+            # A routine starts, as this person: Vidhi runs it and tells them.
+            # the value itself (8, not "the price is now 8"); new items, each
+            seen = ("\n".join(look.found) if watch.when.get("new") or not look.value
+                    else look.value)
+            started, said = self.start_routine(watch, seen)
+            look.turn = "routine" if started else "failed"
+            look.reply = f"started the routine {watch.routine} (run {said})" if started \
+                else ""
+            if not started:
+                look.detail = f"the routine {watch.routine} didn't start: {said}"
+                look.notified = self._send(watch, f"{_message(watch, look, self.store)}\n\n"
+                                                  f"(The routine {watch.routine} didn't "
+                                                  f"start: {said})")
+            self._done(watch, look)
+            return True
         if not watch.then:
             look.turn = "told"
             look.notified = self._send(watch, _message(watch, look, self.store))
