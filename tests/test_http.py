@@ -111,6 +111,34 @@ class TestTheApi:
                         "words": ["whatsapp"], "people": []}
 
 
+class TestFloorsFromAPage:
+    def test_a_floor_set_from_a_page_slows_what_calls_faster(self, served):
+        server, store, _ = served
+        made = watches.create(store, name="rain", check={
+            "tool": "web_fetch", "args": {"url": "https://api.open-meteo.com/v1"}},
+            pick={"number": ""}, when={"below": 5}, every="5m")
+        status, said = call(server, "POST", "/api/floors",
+                            {"site": "open-meteo.com", "every": "15m", "why": "free tier"})
+        assert status == 201 and said["site"] == "open-meteo.com"
+        assert "rain" in said["slowed"][0]
+        assert store.get(made.id).every == "15m"
+        listed = call(server, "GET", "/api/floors")[1]
+        assert [f["site"] for f in listed["floors"]] == ["open-meteo.com"]
+        assert listed["least"] == 300
+
+    def test_a_bad_site_is_a_400_and_a_missing_one_a_404(self, served):
+        server, _, _ = served
+        assert call(server, "POST", "/api/floors", {"site": "a b", "every": "1h"})[0] == 400
+        assert call(server, "DELETE", "/api/floors/nowhere.example")[0] == 404
+
+    def test_removing_a_floor_from_a_page(self, served):
+        server, _, _ = served
+        call(server, "POST", "/api/floors", {"site": "weather_now", "every": "1h"})
+        assert call(server, "DELETE", "/api/floors/weather_now") == (
+            200, {"removed": "weather_now"})
+        assert call(server, "GET", "/api/floors")[1]["floors"] == []
+
+
 class TestTheInlet:
     def wait_for(self, store, watch_id):
         for _ in range(100):

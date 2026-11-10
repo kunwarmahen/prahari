@@ -358,6 +358,8 @@ prahari floor list
 prahari floor rm open-meteo.com                                  # back to 5 minutes
 ```
 
+The same from a page: `/api/floors` (below), which Sarathi's Settings uses.
+
 **Fresh on asking.** `prahari indriya get outside-temp --max-age 5m`
 (and `read_indriya`'s `max_age`, and `?max_age=` on the API) reads it
 again first when the kept value is older than that, with the call you
@@ -711,6 +713,9 @@ GET    /api/indriyas                     every indriya, with its value, age, who
 GET    /api/indriyas/NAME                one, by name or id
 GET    /api/indriyas/NAME/readings?limit=N   its history, newest first, each with what its watches decided
 POST   /api/indriyas/NAME/look | /pause | /resume   (look answers 202 at once)
+GET    /api/floors                       every site's floor
+POST   /api/floors    {site, every, why}  set one; slows what calls faster, and says which
+DELETE /api/floors/SITE                  back to the five-minute floor
 POST   /inlet/WORD                       the inlet (an inlet key; also on --inlet-port alone)
 POST   /inlet/indriya/NAME               a value for a pushed indriya: {"value": 68.2} or the number alone
 ```

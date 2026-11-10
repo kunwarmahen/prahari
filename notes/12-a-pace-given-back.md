@@ -90,6 +90,23 @@ Floors belong to the house, not to a person. The site doesn't care whose
 account is calling, only how often its address is asked.
 `prahari floor list`, `set`, and `rm` (back to five minutes).
 
+**THE SAME FLOORS FROM A PAGE.** `GET /api/floors`, `POST /api/floors
+{site, every, why}` and `DELETE /api/floors/SITE` do what the three
+commands do, behind the page's token, and answer with the same words
+(the floor, and a line for each watch or reading slowed). Sarathi's
+Settings → Sarathi → *Prahari: how often a site may be called* asks them,
+so a floor can be kept without a terminal. Nothing about a floor is the
+page's to decide: a site Prahari can't read is refused there in Prahari's
+words.
+
+```
+$ curl -s -X POST -H "Authorization: Bearer $TOKEN" localhost:8782/api/floors \
+    -d '{"site": "https://api.open-meteo.com/v1", "every": "15m", "why": "free tier"}'
+{"site": "api.open-meteo.com", "every": "15m", "why": "free tier", ...,
+ "said": "api.open-meteo.com is called no more than once every 15 minutes (free tier)",
+ "slowed": ["watch f303989c (rain soon) now looks every 15 minutes (it looked every 5 minutes)"]}
+```
+
 ## Back to its own call
 
 ```
@@ -217,7 +234,8 @@ wishes; a reading with no known pace isn't slowed, and its first speed-up
 remembers one; the agent hears the slow-down; a site is a host
 (subdomains covered) or a tool; a new watch or reading under the floor is
 refused, setting one slows the rest, a speed-up stops at it and says so,
-a fresh read waits for it, and `prahari floor` at the terminal; moving
+a fresh read waits for it, and `prahari floor` at the terminal and
+`/api/floors` from a page; moving
 back keeps memory and the wished pace, never takes someone else's or a
 pushed reading's call, and goes alone; a measured time is the age (ISO
 or seconds), late values are history and fire nothing, unbelievable

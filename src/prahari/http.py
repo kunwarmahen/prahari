@@ -91,7 +91,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from prahari import indriyas, templates, watches
+from prahari import floors, indriyas, recipe, templates, watches
 from prahari.clock import Clock
 from prahari.status import report
 from prahari.store import Store
@@ -267,6 +267,21 @@ class Api:
                 every=str(body.get("every") or ""), share=str(body.get("share") or ""),
                 owner=str(body.get("as") or watches.LOCAL_OWNER), created_via="page")
             return 201, indriyas.card(made, self.store)
+        if parts == ["floors"]:
+            # the house's floors, the same as `prahari floor` (floors.py)
+            if method == "GET":
+                return 200, {"floors": [f.as_dict() for f in self.store.floors()],
+                             "least": recipe.MIN_EVERY.total_seconds()}
+            if method == "POST":
+                floor, slowed = floors.put(self.store, str(body.get("site") or ""),
+                                           str(body.get("every") or ""),
+                                           str(body.get("why") or ""))
+                return 201, {**floor.as_dict(), "said": floors.words(floor),
+                             "slowed": slowed}
+        if len(parts) == 2 and parts[0] == "floors" and method == "DELETE":
+            if not floors.remove(self.store, parts[1]):
+                raise ApiError(404, f"no floor for {parts[1]}")
+            return 200, {"removed": parts[1]}
         if parts == ["indriyas"] and method == "GET":
             return 200, {"indriyas": [indriyas.card(i, self.store)
                                       for i in self.store.indriyas()]}
