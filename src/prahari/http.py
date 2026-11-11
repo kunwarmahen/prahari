@@ -239,8 +239,10 @@ class Api:
             if len(parts) == 2 and method == "PATCH":
                 # who counts as this person is Prahari's to say, never a body's
                 body = {k: v for k, v in body.items() if k not in ("home", "notes")}
-                return 200, watches.card(watches.update(self.store, watch.id, **body),
-                                         self.store)
+                notes: list[str] = []
+                card = watches.card(watches.update(self.store, watch.id, notes=notes,
+                                                   **body), self.store)
+                return 200, {**card, "notes": notes}
             if method == "POST" and action == "pause":
                 return 200, watches.card(watches.pause(self.store, watch.id), self.store)
             if method == "POST" and action == "resume":

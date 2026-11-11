@@ -144,6 +144,8 @@ form.new .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 form.new .hint { font-size: 12px; color: var(--ink-3); }
 form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal-soft);
                   border-radius: 8px; padding: 10px; }
+form.new.mend { margin-top: 10px; background: var(--paper); }
+form.new.mend input, form.new.mend textarea { background: var(--sheet); }
 @media (max-width: 560px) {
   form.new .two { grid-template-columns: 1fr; }
   .state-line { margin-left: 0; text-align: left; }
@@ -271,10 +273,100 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       `<br>News goes to ${s.dvara ? "your chat, through Dvara" : "nobody yet (no Dvara set)"}`;
   }
 
+  // -- mending a watch ----------------------------------------------------
+  // Its own words go in the boxes as typed (number, above 80, 3h); only the
+  // boxes that changed are sent, so a new name keeps what it saw and a new
+  // pick or test starts it over. A test whose number changes carries the
+  // number into its name and wording, in the boxes, before anything is saved.
+  let mending = null;
+  function pickWords(pick) {
+    const [kind, value] = Object.entries(pick || {})[0] || [];
+    if (!kind) return "";
+    if (kind === "items_json") return `items_json:${value}:${pick.key || ""}`;
+    if (Object.keys(pick).length > 1) return JSON.stringify(pick);
+    return value ? `${kind}:${value}` : kind;
+  }
+  function whenWords(when) {
+    const [kind, value] = Object.entries(when || {})[0] || [];
+    if (!kind) return "";
+    if (Object.keys(when).length > 1) return JSON.stringify(when);
+    return value === true ? kind : `${kind} ${value}`;
+  }
+  function mendForm(w) {
+    const self = !w.listen && !w.sense;
+    const box = (label, name, value, extra = "") =>
+      `<label>${label} <input name="${name}" value="${esc(value ?? "")}" ${extra}></label>`;
+    return `<form class="new mend" data-mend="${esc(w.id)}" autocomplete="off">
+      ${box("Name", "name", w.name, "required")}
+      ${box("What it's for, in your words", "asked", w.asked)}
+      ${box("The thing it watches", "thing", w.thing)}
+      ${self ? `<div class="two">${box("Look with", "tool", (w.check || {}).tool)}
+        ${box("Every", "every", w.every)}</div>
+        ${box("The tool's arguments (JSON)", "args", JSON.stringify((w.check || {}).args || {}), 'class="mono"')}`
+        : `<p class="hint">${w.listen ? `It listens at the inlet for ${esc(w.listen)}` :
+            `It senses the reading “${esc(senseNames[w.sense] || w.sense)}”`}: its call and how
+            often belong to ${w.listen ? "the inlet" : "the indriya"}, not to this watch.</p>`}
+      <div class="two">${box("Pick", "pick", pickWords(w.pick), 'class="mono"')}
+        ${box("When", "when", whenWords(w.when), 'class="mono" required')}</div>
+      <label>Then ask the agent (leave empty to just tell you)
+        <textarea name="then">${esc(w.then || "")}</textarea></label>
+      ${box("Most times a day", "max_per_day", w.max_per_day, 'type="number" min="1" max="200"')}
+      <p class="hint">A new pick or test starts it over: it forgets what it saw, and its next
+        look decides afresh.</p>
+      <div><button class="btn main" type="submit">Save changes</button>
+        <button class="btn link" type="button" data-act="mend">Cancel</button></div></form>`;
+  }
+  // the test's numbers, swapped into words still saying the old ones
+  const numbers = (text) => String(text).match(/-?\d+(?:\.\d+)?/g) || [];
+  function carryNumbers(f, w) {
+    const olds = numbers(whenWords(w.when) + " " + pickWords(w.pick));
+    const news = numbers(f.elements.when.value + " " + f.elements.pick.value);
+    for (const key of ["name", "asked", "thing"]) {
+      const input = f.elements[key];
+      if (input.dataset.typed) continue;          // the person's own words win
+      let text = w[key] || "";
+      if (olds.length === news.length) olds.forEach((o, i) => {
+        if (o !== news[i]) text = text.replace(new RegExp(`(?<![\\d.])${o.replace(".", "\\.")}(?!\\d)`, "g"), news[i]);
+      });
+      input.value = text;
+    }
+  }
+  $("watches").addEventListener("input", (e) => {
+    const f = e.target.closest("form.mend"); if (!f) return;
+    const w = byId[f.dataset.mend];
+    if (["name", "asked", "thing"].includes(e.target.name)) e.target.dataset.typed = "1";
+    if (["when", "pick"].includes(e.target.name)) carryNumbers(f, w);
+  });
+  $("watches").addEventListener("submit", async (e) => {
+    const f = e.target.closest("form.mend"); if (!f) return;
+    e.preventDefault();
+    const w = byId[f.dataset.mend], el = f.elements, body = {};
+    try {
+      for (const key of ["name", "asked", "thing", "then"]) {
+        if (el[key].value.trim() !== (w[key] || "").trim()) body[key] = el[key].value.trim();
+      }
+      if (el.when.value.trim() !== whenWords(w.when)) body.when = whenOf(el.when.value);
+      if (el.pick.value.trim() !== pickWords(w.pick)) body.pick = pickOf(el.pick.value);
+      if (Number(el.max_per_day.value) !== w.max_per_day) body.max_per_day = Number(el.max_per_day.value);
+      if (el.every && el.every.value.trim() !== (w.every || "")) body.every = el.every.value.trim();
+      if (el.tool) {
+        const args = el.args.value.trim() ? JSON.parse(el.args.value) : {};
+        if (el.tool.value.trim() !== (w.check || {}).tool
+            || JSON.stringify(args) !== JSON.stringify((w.check || {}).args || {}))
+          body.check = { tool: el.tool.value.trim(), args };
+      }
+      if (Object.keys(body).length) await api("PATCH", `watches/${w.id}`, body);
+      mending = null;
+      await refresh();
+    } catch (err) { fail(err); }
+  });
+
   async function list() {
     const { watches } = await api("GET", "watches");
     names = Object.fromEntries(watches.map((w) => [w.id, w.name]));
     byId = Object.fromEntries(watches.map((w) => [w.id, w]));
+    // a Mend form being typed in stays as it is until saved or closed
+    if (mending && document.querySelector(`form.mend[data-mend="${CSS.escape(mending)}"]`)) return;
     const box = $("watches");
     if (!watches.length) {
       box.innerHTML = `<p class="empty">No watches yet. Ask your agent "tell me when…", or ` +
@@ -304,8 +396,10 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
             aria-label="how often it looks, like 30m, 3h or 1d" size="5">
             <button class="btn link" data-act="every">Save</button></span>`}
           <button class="btn link" data-act="${w.state === "paused" ? "resume" : "pause"}">${w.state === "paused" ? "Resume" : "Pause"}</button>
+          <button class="btn link" data-act="mend">${mending === w.id ? "Close" : "Mend"}</button>
           <button class="btn link" data-act="looks">Looks</button>
-          <button class="btn link danger" data-act="delete">Delete</button></div></div>`;
+          <button class="btn link danger" data-act="delete">Delete</button></div>
+        ${mending === w.id ? mendForm(w) : ""}</div>`;
     }).join("");
   }
 
@@ -534,6 +628,7 @@ form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal
       if (act === "looks" || act === "last") {
         lookingAt = { id, name }; openFirst = act === "last";
         await looks(); $("looks").scrollIntoView({ behavior: "smooth" }); return; }
+      if (act === "mend") { mending = mending === id ? null : id; await list(); return; }
       if (act === "delete" && !confirm(`Delete "${name}", its looks and what it saw?`)) return;
       if (act === "delete") await api("DELETE", `watches/${id}`);
       else if (act === "every") {

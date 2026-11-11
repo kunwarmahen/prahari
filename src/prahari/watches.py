@@ -29,6 +29,7 @@ reasoning should not be able to leave hundreds behind.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -415,12 +416,13 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     allowed = {"name", "asked", "thing", "check", "pick", "when", "every", "then",
                "allow_tools", "max_per_day", "wake", "renew", "starts", "ends", "stop",
                "keep", "sense", "home", "routine", "routine_inputs", "look_itself",
-               "notes"}
+               "notes", "carry_words"}
     unknown = [k for k in changes if k not in allowed]
     if unknown:
         raise WatchError(f"can't change {', '.join(unknown)}; can change: "
                          f"{', '.join(sorted(allowed))}")
     given = {k: v for k, v in changes.items() if v is not None}
+    carry = bool(given.pop("carry_words", False))
     home = given.pop("home", None)
     notes = given.pop("notes", None)
     if given.pop("look_itself", None):
@@ -519,7 +521,82 @@ def update(store: Store, watch_id: str, *, owner: str | None = None, **changes) 
     store.update(watch.id, **fields)
     if recipe_keys & set(given):
         store.forget_seen(watch.id)
-    return store.get(watch.id)
+    after = store.get(watch.id)
+    said = reworded(watch, after, given) if {"when", "pick"} & set(given) else {}
+    if said and carry:
+        # asked for: the words go with the test, in the same mend
+        store.update(watch.id, **said)
+        after = store.get(watch.id)
+        if notes is not None:
+            notes.append(f"its {', '.join(said)} now say the new test too")
+    elif said and notes is not None:
+        notes.append(stale_words(watch, after, said))
+    elif carry and notes is not None and {"when", "pick"} & set(given):
+        # nothing to carry: its words never said the test it had
+        notes.append(f"its words don't say its old test ({whenish(watch)}), so they "
+                     "were left as they are; give a new name, asked or thing to "
+                     "change them")
+    return after
+
+
+def whenish(watch: Watch) -> str:
+    """Its test in short words: ``above 80``."""
+    kind, value = next(iter((watch.when or {}).items()), ("", ""))
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return kind if value is True else f"{kind} {value}".strip()
+
+
+#: The words a watch is known by, which a person reads in their list.
+WORDED = ("name", "asked", "thing")
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def reworded(before: Watch, after: Watch, given=()) -> dict:
+    """Its words with the test's old numbers swapped for the new: the
+    name, asked and thing a mended test left saying the old one.
+
+    THE TEST CHANGED, THE NAME DID NOT. "Cool the guestroom above 70"
+    mended to ``above 80`` still said 70 in every list it was shown in
+    while it acted at 80. Only a word the person did not change in the
+    same mend is offered; a number that is not the test's is left alone
+    (one that also appears in the test is swapped -- "Bedroom 2" with a
+    test of ``above 2`` is the price, and why this is offered, not done,
+    unless the mend asks for it with ``carry_words``).
+    """
+    olds = _numbers(before)
+    news = _numbers(after)
+    if len(olds) != len(news):
+        return {}
+    swaps = {o: n for o, n in zip(olds, news, strict=True) if o != n}
+    if not swaps:
+        return {}
+    pattern = re.compile(r"(?<![\d.])(" + "|".join(map(re.escape, sorted(swaps, key=len,
+                                                                       reverse=True)))
+                         + r")(?![\d])")
+    out = {}
+    for key in WORDED:
+        if key in given:
+            continue
+        text = getattr(after, key) or ""
+        new = pattern.sub(lambda m: swaps[m.group(1)], text)
+        if new != text:
+            out[key] = new
+    return out
+
+
+def _numbers(watch: Watch) -> list[str]:
+    """The numbers in its test and pick as a person writes them: 80, not
+    the 80.0 a test typed at the terminal is kept as."""
+    found = _NUMBER.findall(json.dumps([watch.when, watch.pick], sort_keys=True))
+    return [str(int(float(n))) if float(n).is_integer() else n for n in found]
+
+
+def stale_words(before: Watch, after: Watch, said: dict) -> str:
+    """The note a mend leaves when its words still say the old test."""
+    shown = "; ".join(f'{k} "{getattr(after, k)}" -> "{v}"' for k, v in said.items())
+    return (f"its words still say the old test ({shown}); change them too with "
+            f"{', '.join(said)}")
 
 
 def _move_onto(store: Store, watch: Watch, sense: str, home: set[str] | None,

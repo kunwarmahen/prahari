@@ -218,7 +218,9 @@ TOOLS: list[dict] = [
          "pick found nothing (a site changed): preview a new pick first. Changing the "
          "check, pick, when or every starts its memory over (the next look learns). "
          "When the person says to keep a watch that ended or asked whether it's still "
-         "wanted, give keep: true (and a new ends, if they say one)."),
+         "wanted, give keep: true (and a new ends, if they say one). A new line (70 "
+         "to 80) goes with its words: give carry_words: true, or the new name, asked "
+         "and thing yourself, so the watch never says the old line."),
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "name": {"type": "string"},
          "asked": _ASKED, "thing": _THING,
@@ -238,6 +240,9 @@ TOOLS: list[dict] = [
              "itself (only for the person's own indriya; what it remembered is kept, "
              "and the indriya slows back down if this watch was its fastest need). "
              "Give it alone")},
+         "carry_words": {"type": "boolean", "description": (
+             "with a new when or pick: its new number also goes into the name, asked "
+             "and thing wherever they said the old one")},
          "then": {"type": "string"}, "routine": _ROUTINE,
          "routine_inputs": _ROUTINE_INPUTS,
          "max_per_day": {"type": "integer", "minimum": 1, "maximum": 200}},
@@ -516,7 +521,8 @@ class Tools:
         changes = {k: args[k] for k in ("name", "asked", "thing", "check", "pick", "when",
                                         "every", "then", "max_per_day", "wake", "renew",
                                         "starts", "ends", "stop", "keep", "sense",
-                                        "routine", "routine_inputs", "look_itself")
+                                        "routine", "routine_inputs", "look_itself",
+                                        "carry_words")
                    if k in args}
         if changes.get("sense") or changes.get("look_itself"):
             changes["home"] = self.home

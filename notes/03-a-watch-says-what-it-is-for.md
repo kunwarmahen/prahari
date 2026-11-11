@@ -153,3 +153,7 @@ flight once it lands — is [note 04](04-a-watch-has-its-days.md).
 * **The spoken yes.** At a speaker the person cannot see the card, and
   several yeses in a row can each approve something. That belongs to the
   speaker's side, which should read the watch aloud before the yes.
+* ~~**Words that follow a mended test.**~~ A mend that moves the test's
+  number says which words still say the old one, and carries them when
+  asked or shown first
+  ([13 — a name that says its line](13-a-name-that-says-its-line.md)).

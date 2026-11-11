@@ -10,6 +10,7 @@
           --then "Read me what Mum said, and draft a reply I can send."
     prahari list | show ID | looks [ID] | look ID | pause ID | resume ID | rm ID
     prahari edit ID --pick ... --when ... --every ...     mend a watch
+    prahari edit ID --when 'above 80' --carry-words     ...and its name says 80 too
     prahari allow ID TOOL...                    let its then-turn use more tools unasked
     prahari add "Mail from the bank" ... --every 6h --wake work-mail
                                                 looks at once when work-mail knocks
@@ -190,6 +191,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--look-itself", action="store_true", default=None, dest="look_itself",
                    help="stop sensing its indriya and make the indriya's call itself "
                         "again (what it remembered is kept; the indriya may slow down)")
+    p.add_argument("--carry-words", action="store_true", dest="carry_words",
+                   help="a new --when or --pick's number goes into its name, asked "
+                        "and thing too, where they said the old one")
     p.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("list", help="every watch")
@@ -646,6 +650,8 @@ def _dispatch(args, store: Store, state: Path) -> int:
                 changes["sense"] = args.sense
             if args.look_itself:
                 changes["look_itself"] = True
+        if args.carry_words:
+            changes["carry_words"] = True
         notes: list[str] = []
         watch = watches.update(store, watch.id, notes=notes, **changes)
         if args.json_out:

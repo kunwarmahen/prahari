@@ -163,6 +163,8 @@ prahari show 1e69              # one watch in full (the first letters of its id 
 prahari look 1e69              # look once, now, here -- and wait
 prahari edit 1e69 --every 2h   # mend its check, pick, test, how often or then
                                # (how often alone keeps what it saw)
+prahari edit 1e69 --when 'above 80' --carry-words
+                               # a new line, and its name and words say 80 too
 prahari pause 1e69 | resume 1e69 | rm 1e69
 ```
 
@@ -680,7 +682,13 @@ banned for them.
 `prahari serve` serves a page at the address it prints: every watch in
 words, when it looks next and what it saw last, with **Look now**, an
 **every** box and **Save** to change how often it looks (30m, 3h, 1d;
-no less than 5 minutes), **Pause** / **Resume**, **Looks** (its history) and **Delete**.
+no less than 5 minutes), **Pause** / **Resume**, **Mend**, **Looks** (its
+history) and **Delete**. **Mend** opens the watch's own words in boxes
+(name, what it's for, the thing, its check, pick, test, then, how many a
+day) and saves only what you changed. Change the number in its test, 70
+to 80, and the name and words that said 70 say 80 too, in the boxes,
+before you save; a box you typed in yourself is left as you typed it
+([notes/13](notes/13-a-name-that-says-its-line.md)).
 A watch that senses an indriya says which (*senses: outside-temp*) and has
 no **Look now** or **every** of its own; **Indriyas** lists each reading
 with its value, how old it is, which watches sense it, **Read now** and
@@ -744,7 +752,7 @@ is on it, and every day and time their watches say is said on it.
 | `list_watches`, `watch_looks` | what this person is watching, and what each saw |
 | `inlet_address` | where this person's phone or webhook sends, with their own key |
 | `create_watch` | saves one, after the person agreed: with a `name` they will know it by and `asked`, their own words; a second watch on the same call and pick is refused, naming the first (a line on the other side of the same number is allowed: a band is two watches); on a call an indriya already makes it senses that indriya and says so (`look_itself: true` for its own call); `routine` starts one of the person's Vidhi routines when it fires, instead of `then` |
-| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya, and `look_itself: true` moves it back to its own call (the person's own indriya only); `routine` gives it a routine to start (a `then` takes it away) |
+| `update_watch` | mends one: a site moved its price, so the pick needs changing; `keep: true` when the person says to keep one that ended or asked whether it's still wanted; `sense` moves one that calls itself onto an indriya, and `look_itself: true` moves it back to its own call (the person's own indriya only); `routine` gives it a routine to start (a `then` takes it away); a new line goes with its words, given or `carry_words: true` ([notes/13](notes/13-a-name-that-says-its-line.md)) |
 | `allow_for_watch` | lets a watch's then-turn use a tool it was refused |
 | `pause_watch`, `resume_watch`, `delete_watch` | |
 | `list_indriyas`, `read_indriya` | the readings this person may use (their own and the house's), each with its value and how old it is; the description tells the model to answer from a fresh one instead of calling the tool again; `max_age` reads it again first when it's older (not within 5 minutes, or the site's floor) |
@@ -788,6 +796,7 @@ Each one is there because of a way an unwatched watch goes wrong
 | **A watch says what it is for** | every message carries your own words and where it looks — `You asked: "keep an eye on the nonstop to Phoenix"` then `(tells you when the fare is below 571; looks at google.com/travel/flights every 6 hours · watch 9b904bc4)`. A watch made with no name is named by its page and line, never after the tool it looks with ([notes/03](notes/03-a-watch-says-what-it-is-for.md)) |
 | **A watch has its days** | `starts`, `ends` and `stop` (a flight that landed): nothing is looked at before it starts, and one whose end came ends and says so, with no yes asked — it was agreed with the watch. Ended, it's kept 30 days, then removed; with no end at all, it asks once a month whether it's still wanted ([notes/04](notes/04-a-watch-has-its-days.md)) |
 | **One thing, one watch** | a second watch on the same call and pick is refused, naming the first: mend that one instead. Two watches on one fare, under names nobody chose, is how you stop knowing which is which |
+| **A name says its line** | a mend that moves the test's number (above 70 to above 80) says which of its name, asked and thing still say the old one and what they would say; the pages carry the number into those boxes before Save, `--carry-words` (and `carry_words`) does it in the same mend, and words that never said the old test are left alone and said so ([notes/13](notes/13-a-name-that-says-its-line.md)) |
 | **A band is two watches** | one number watched from both sides — heat below 60, cool above 70 — is two watches on the same check, one line each, each with its own `then`. Each fires once as its line is crossed, with no model asked to decide; a second line the *same* way is still refused ([notes/05](notes/05-a-look-says-why.md)) |
 | **One reading, many watches** | an indriya reads once for every watch that senses it, and each watch is judged on the whole answer by the rules above, as if it had looked itself. A failed reading is said on each watch's looks and counted once, against the indriya; one a watch still senses is never removed ([notes/06](notes/06-one-reading-many-watches.md)) |
 | **A value sent in can go quiet** | a pushed indriya's value comes only with the key of its own person; silence past its every, or "unavailable", is a failed reading said on each watch, three pause it and tell its owner, and the sender coming back starts it again ([notes/08](notes/08-a-value-sent-in.md)) |
@@ -889,7 +898,9 @@ src/prahari/
 │                indriyas and their readings
 ├── watches.py   make, mend, pause, find, a cap per person, one watch per
 │                call and pick; preview, which looks once with nothing
-│                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
+│                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md));
+│                a mended line said in its words, or carried into them
+│                ([notes/13](notes/13-a-name-that-says-its-line.md))
 ├── templates.py a reading with blanks: the ones that come with Prahari
 │                (templates/), or a marketplace's through `vidhi market get`;
 │                filled in, a blank in an address quoted; the take-backs
@@ -947,7 +958,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 319 tests. The API is not stable.
+tools work, and are covered by 329 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
