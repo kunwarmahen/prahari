@@ -17,7 +17,14 @@ Two places to find one:
   and a reviewer reads and signs it before it is listed. Prahari fetches
   one through ``vidhi market get``, which checks the signature against
   the reviewers THIS person trusts; the indriya it makes says who signed
-  it.
+  it, and keeps the sha256 of the exact text that was reviewed.
+
+A REVIEW TAKEN BACK PAUSES WHAT WAS MADE FROM IT. A reviewer can take a
+review back (Vidhi's notes/08); Vidhi believes it only when a reviewer
+this person trusts signed it, and keeps it. ``taken_back`` asks Vidhi for
+that list (``vidhi market revoked``), and the clock pauses every reading
+made from a text on it, saying who and why. Resuming it is refused; a
+reading whose call or pick is mended is its owner's own, and runs again.
 
 A TEMPLATE IS ONE CALL WITH BLANKS, AND NOTHING ELSE. Its file says
 ``kind = "indriya"``, a name, a ``[check]`` (one tool, its arguments, a
@@ -35,6 +42,7 @@ agent's ``install_indriya_template`` says what it calls).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -77,6 +85,8 @@ class Template:
     #: "prahari" (comes with it), or "market" (fetched, signed)
     source: str = "prahari"
     signed_by: str = ""
+    #: The exact text's sha256, for one from a marketplace ("" otherwise).
+    sha256: str = ""
 
     def card(self) -> dict:
         return {"name": self.name, "title": self.title, "about": self.about,
@@ -224,7 +234,8 @@ def install(store: Store, template: Template, given: dict, *, name: str = "",
         pick=recipe.pick_from_text(template.pick) if template.pick else None,
         every=every or template.every, thing=template.thing,
         share=share or template.share, owner=owner, runner=runner, agent=agent,
-        created_via=f"{created_via}: {whence}", dvara=dvara, pushed=template.pushed)
+        created_via=f"{created_via}: {whence}", dvara=dvara, pushed=template.pushed,
+        template_sha256=template.sha256 if template.source == "market" else "")
 
 
 # -- from a marketplace -------------------------------------------------------------
@@ -264,5 +275,15 @@ def fetch(name: str) -> Template:
     if not isinstance(got, dict) or got.get("kind") != "indriya":
         raise WatchError(f"{name} in the marketplace is a routine, not an indriya "
                          "template (install it in Vidhi)")
-    return parse(str(got.get("toml") or ""), source="market",
-                 signed_by=str(got.get("signed_by") or ""))
+    text = str(got.get("toml") or "")
+    template = parse(text, source="market", signed_by=str(got.get("signed_by") or ""))
+    template.sha256 = hashlib.sha256(text.encode()).hexdigest()
+    return template
+
+
+def taken_back() -> list[dict]:
+    """The reviews Vidhi believed taken back (each signed by a reviewer
+    this person trusts): name, version, sha256, reviewer, why."""
+    kept = _vidhi(["market", "revoked"])
+    return [k for k in kept if isinstance(k, dict) and k.get("sha256")] \
+        if isinstance(kept, list) else []

@@ -322,7 +322,11 @@ prahari indriya install eth-price --from-market     # signed, checked against yo
 A blank in an address is one value: `Cary&key=x` arrives as
 `Cary%26key%3Dx` and can't add a parameter. The page's **From a
 template** button and the agent's `indriya_templates` and
-`install_indriya_template` do the same.
+`install_indriya_template` do the same. A reading from a marketplace
+keeps the exact text it was made from; if the reviewer later takes the
+review back (and a reviewer you trust signed that), the clock pauses it
+within the hour and tells you who and why. It won't resume as it was;
+mend it with `prahari indriya edit` and it's your own.
 
 **One call stays one call, by itself.** A new watch on exactly the call
 an indriya already makes senses it instead, and says so; one that asked
@@ -888,7 +892,8 @@ src/prahari/
 │                granted ([notes/03](notes/03-a-watch-says-what-it-is-for.md))
 ├── templates.py a reading with blanks: the ones that come with Prahari
 │                (templates/), or a marketplace's through `vidhi market get`;
-│                filled in, a blank in an address quoted
+│                filled in, a blank in an address quoted; the take-backs
+│                Vidhi believed (`taken_back`)
 │                ([notes/11](notes/11-a-reading-from-a-template.md))
 ├── indriyas.py  shared readings: make, mend, find (own first, then the
 │                house's), never removed while sensed; their words and age
@@ -907,7 +912,9 @@ src/prahari/
 │                what its check answered ([notes/05](notes/05-a-look-says-why.md)); the inlet's
 │                events; firing: a line that says what it is for, a
 │                then-turn with what was found marked as outside text, or
-│                a routine started ([notes/10](notes/10-then-a-routine.md))
+│                a routine started ([notes/10](notes/10-then-a-routine.md));
+│                a reading from a review taken back paused, hourly
+│                ([notes/11](notes/11-a-reading-from-a-template.md))
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
 │                for word), the yes/no for ask, the then-turn (Samay's
 │                direct road); Roads, each watch's look on its own road;
@@ -940,7 +947,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 310 tests. The API is not stable.
+tools work, and are covered by 319 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,

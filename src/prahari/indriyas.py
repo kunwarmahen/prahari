@@ -74,6 +74,12 @@ that pace was; its first speed-up remembers it.
 A SITE MAY ASK FOR MORE THAN FIVE MINUTES. A floor kept for the site
 (floors.py) holds a reading's pace, its speed-ups and its fresh reads.
 
+MADE FROM A REVIEW TAKEN BACK, IT STOPS. A reading made from a
+marketplace template keeps that text's sha256; when Vidhi believes a
+take-back of its review, the clock pauses it (``TAKEN_BACK`` heads the
+reason) and tells its owner. ``resume`` refuses it; mending its call or
+pick makes it the owner's own reading, and it runs again.
+
 UNUSED, IT STOPS. Every reading a watch decides on, and every reader
 that asks for the value, marks it used (``used_at``). Thirty days with
 neither and the clock pauses it and tells its owner, as a watch with no
@@ -105,6 +111,9 @@ DEFAULT_PUSHED_PICK = {"json": "value"}
 FRESH_FLOOR = recipe.MIN_EVERY
 #: Unused this long (no watch decided on it, nobody asked), it pauses.
 UNUSED = timedelta(days=30)
+#: How a pause for a review taken back begins (resume refuses it).
+TAKEN_BACK = "review taken back"
+
 
 
 def max_indriyas() -> int:
@@ -153,7 +162,7 @@ def checked(*, name: str, check=None, pick=None, every: str = "", thing: str = "
 def create(store: Store, *, name: str, check=None, pick=None, every: str = "",
            thing: str = "", share: str = "mine", owner: str = LOCAL_OWNER,
            runner: str = "direct", agent: str = "", created_via: str = "cli",
-           dvara=None, pushed: bool = False) -> Indriya:
+           dvara=None, pushed: bool = False, template_sha256: str = "") -> Indriya:
     parts = checked(name=name, check=check, pick=pick, every=every, thing=thing,
                     share=share, pushed=pushed)
     if any(i.name == parts["name"] for i in store.indriyas(owner=owner)):
@@ -185,7 +194,8 @@ def create(store: Store, *, name: str, check=None, pick=None, every: str = "",
     first = (now_utc() + recipe.every(parts["every"])) if pushed else now_utc()
     made = Indriya(id="", owner=owner, runner="direct" if pushed else runner,
                    agent=agent, created_via=created_via, next_at=iso(first),
-                   pushed=pushed, own_every=parts["every"], **parts)
+                   pushed=pushed, own_every=parts["every"],
+                   template_sha256=template_sha256, **parts)
     return store.add_indriya(made)
 
 
@@ -260,8 +270,10 @@ def update(store: Store, indriya_id: str, **changes) -> Indriya:
                       next_at=iso(now_utc() + recipe.every(parts["every"])
                                   if current.pushed else now_utc()))
         if current.state == "paused" and current.paused_because.startswith(
-                ("broken", "failed")):
+                ("broken", "failed", TAKEN_BACK)):
             fields.update(state="active", paused_because="")
+        # mended, it is no longer the reviewed text: the owner's own
+        fields["template_sha256"] = ""
         for watch in store.watches(sense=current.id):
             store.update(watch.id, looked=False, last_value="", armed=True, trouble=0)
             store.forget_seen(watch.id)
@@ -478,6 +490,10 @@ def pause(store: Store, indriya: Indriya, because: str = "paused by you") -> Ind
 
 
 def resume(store: Store, indriya: Indriya) -> Indriya:
+    if indriya.state == "paused" and indriya.paused_because.startswith(TAKEN_BACK):
+        raise WatchError(f"{indriya.name} is paused: {indriya.paused_because}. It stays "
+                         f"paused as it was; mend it (prahari indriya edit {indriya.name}) "
+                         "to make it your own, or remove it")
     # used from now: a reading paused as unused gets its month again
     store.update_indriya(indriya.id, state="active", paused_because="", trouble=0,
                          next_at=iso(now_utc()), used_at=iso(now_utc()))

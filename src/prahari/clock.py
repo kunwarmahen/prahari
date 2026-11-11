@@ -59,6 +59,12 @@ Every rule here exists because of a way an unwatched watch goes wrong:
   looks (so "why so quiet?" has an answer there too) but counted only
   against the indriya: three in a row pause IT, and its owner is told
   which watches went quiet with it.
+* A READING FROM A REVIEW TAKEN BACK STOPS. Once an hour, when any
+  active reading was made from a marketplace template, the clock asks
+  Vidhi for the take-backs it believed (``templates.taken_back``) and
+  pauses each reading made from a text on that list, telling its owner
+  who took the review back and why. Vidhi out of reach: asked again next
+  hour; nothing is paused on a guess.
 
 WHAT A FIRE DOES is the watch's ``then``. Empty: the person is told what
 it saw, in a line, with no model at all. Otherwise the agent is given
@@ -135,6 +141,8 @@ FOUND_SHOWN = 10
 EVENT_WINDOW = 600
 #: How often a push is renewed, and how soon again after one failed.
 RENEW_EVERY = timedelta(days=1)
+#: How often Vidhi is asked which reviews were taken back.
+TAKE_BACKS_EVERY = timedelta(hours=1)
 RENEW_RETRY = timedelta(hours=1)
 
 
@@ -153,9 +161,13 @@ class Clock:
                  on_record: Callable[[Watch, Look], None] | None = None,
                  home: set[str] | None = None,
                  on_reading: Callable[[Indriya, Reading], None] | None = None,
-                 start_routine: Callable[[Watch, str], tuple[bool, str]] | None = None
+                 start_routine: Callable[[Watch, str], tuple[bool, str]] | None = None,
+                 take_backs: Callable[[], list[dict]] | None = None
                  ) -> None:
         self.store = store
+        #: The reviews taken back that Vidhi believed (templates.taken_back).
+        self.take_backs = take_backs
+        self._take_backs_at: datetime | None = None
         #: How a watch with a routine starts it (looking.start_routine: Vidhi).
         self.start_routine = start_routine or looking_start_routine
         self.caller = caller
@@ -228,7 +240,35 @@ class Clock:
                 self._silent(indriya)
                 continue
             started.append(self._submit_reading(indriya, "clock"))
+        due = self._take_backs_at is None or self._take_backs_at + TAKE_BACKS_EVERY <= now
+        if due and any(i.template_sha256 for i in self.store.indriyas(state="active")):
+            self._take_backs_at = now
+            started.append(self._pool.submit(self.check_take_backs))
         return started
+
+    def check_take_backs(self) -> list[str]:
+        """Pause each active reading made from a template whose review a
+        trusted reviewer took back; the names paused."""
+        from prahari.indriyas import TAKEN_BACK
+        from prahari.templates import taken_back
+
+        try:
+            kept = (self.take_backs or taken_back)()
+        except Exception:                    # Vidhi away: next hour, never a guess
+            return []
+        by_text = {str(k.get("sha256")): k for k in kept}
+        paused = []
+        for indriya in self.store.indriyas(state="active"):
+            found = by_text.get(indriya.template_sha256) if indriya.template_sha256 else None
+            if found is None:
+                continue
+            self._pause_indriya(
+                indriya, f"{TAKEN_BACK} by {found.get('reviewer')} (template "
+                         f"{found.get('name')} version {found.get('version')}): "
+                         f"{found.get('why') or 'no reason given'}",
+                mend=True)
+            paused.append(indriya.name)
+        return paused
 
     def calendar(self, now: datetime) -> None:
         """A watch's days, kept with no model: one whose end came ends and
@@ -473,7 +513,7 @@ class Clock:
             look.said = reading.said
             self._done(watch, look)
 
-    def _pause_indriya(self, indriya: Indriya, because: str) -> None:
+    def _pause_indriya(self, indriya: Indriya, because: str, mend: bool = False) -> None:
         from prahari.indriyas import probe
 
         current = self.store.get_indriya(indriya.id)
@@ -483,9 +523,12 @@ class Clock:
         using = self.store.watches(sense=indriya.id)
         quiet = ("\nWatches that go quiet with it: "
                  + ", ".join(w.name for w in using)) if using else ""
+        after = (f"It stays paused as it was. Mend it (prahari indriya edit "
+                 f"{indriya.name}) to make it your own, or remove it."
+                 if mend else "Say so in a chat with me and I'll mend it, or resume it "
+                              f"with: prahari indriya resume {indriya.name}")
         self._send(probe(indriya), f"Paused: indriya {indriya.name}\n{because}{quiet}\n"
-                   "Say so in a chat with me and I'll mend it, or resume it with: "
-                   f"prahari indriya resume {indriya.name}")
+                   + after)
 
     # -- the inlet ---------------------------------------------------------
 

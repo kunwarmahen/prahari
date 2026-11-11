@@ -215,6 +215,10 @@ class Indriya:
     #: comes back to it. "" for one made before this was kept: it is not
     #: slowed down, since nobody knows what it was.
     own_every: str = ""
+    #: The sha256 of the marketplace template it was made from, exactly as
+    #: reviewed: a take-back of that review pauses it. "" when made here,
+    #: from one that comes with Prahari, or after its call was mended.
+    template_sha256: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -442,7 +446,8 @@ _ADDED = {"watch": (("wake", "TEXT NOT NULL DEFAULT ''"),
                       ("measured_at", "TEXT")),
           "mailbox": (("account", "TEXT NOT NULL DEFAULT ''"),),
           "indriya": (("used_at", "TEXT"), ("pushed", "INTEGER NOT NULL DEFAULT 0"),
-                      ("own_every", "TEXT NOT NULL DEFAULT ''"))}
+                      ("own_every", "TEXT NOT NULL DEFAULT ''"),
+                      ("template_sha256", "TEXT NOT NULL DEFAULT ''"))}
 
 
 class Store:

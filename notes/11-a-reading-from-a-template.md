@@ -71,6 +71,23 @@ and every address it reaches, signed with the reviewer's SSH key.
 trusts and refuses otherwise. Prahari keeps no keys and no trust list of
 its own: one place decides what is signed.
 
+**A REVIEW TAKEN BACK PAUSES WHAT WAS MADE FROM IT.** A reviewer can take
+a review back (Vidhi's notes/08). A reading made `--from-market` keeps
+the sha256 of the exact text that was reviewed (`template_sha256`).
+Once an hour, and only when some active reading has one, the clock asks
+`vidhi market revoked --json` for the take-backs Vidhi believed -- each
+signed by a reviewer *this person* trusts, the same list as the review
+-- and pauses every reading made from a text on it, saying who took the
+review back and why, and naming the watches that go quiet with it.
+
+* **THE EXACT TEXT, NOT THE NAME.** A reading made from one that comes
+  with Prahari, or from another version, or made here, is not touched.
+* **RESUME IS REFUSED; A MEND IS THE OWNER'S.** `prahari indriya resume`
+  says why it stays paused. Mending its call or pick makes it the owner's
+  own reading: the hash goes, and it runs again.
+* **VIDHI AWAY IS NOT A TAKE-BACK.** No answer from Vidhi pauses nothing;
+  it is asked again the next hour.
+
 ## The doors
 
 | Door | Templates | Install |
@@ -112,6 +129,30 @@ $ prahari indriya get eth-price --max-age 5m
           made Mon 9 Nov 15:35 (by cli: template eth-price v1, signed by rita), for local
 ```
 
+### A review taken back
+
+A scratch marketplace with reviewer `rita`, a pushed `porch-temp`
+template published, approved, and installed in a scratch Prahari through
+a scratch Vidhi that trusts `rita`; then `rita` took the review back:
+
+```
+$ prahari indriya install porch-temp --from-market
+added indriya porch-temp from porch-temp (signed by rita): keeps the porch temperature, pushed in to the inlet as porch-temp (a value expected at least every hour)
+$ vidhi market revoke porch-temp --version 1 --why "it asks for your street address" --key rita --as rita
+porch-temp v1: review taken back by rita (it asks for your street address); ...
+$ vidhi market check
+taken back: porch-temp v1 by rita
+$ prahari serve --port 8812          # a few seconds: the clock's first tick
+$ prahari indriya list
+ac82ab77  paused  porch-temp: not read yet [paused: review taken back by rita (template porch-temp version 1): it asks for your street address]
+$ prahari indriya resume porch-temp
+error: porch-temp is paused: review taken back by rita (template porch-temp version 1): it asks for your street address. It stays paused as it was; mend it (prahari indriya edit porch-temp) to make it your own, or remove it
+$ prahari indriya edit porch-temp --pick json:reading
+updated indriya porch-temp: ...
+$ prahari indriya list
+ac82ab77  active  porch-temp: not read yet
+```
+
 ## Not here
 
 * **A template that makes watches too.** A template makes a reading.
@@ -119,7 +160,5 @@ $ prahari indriya get eth-price --max-age 5m
 * **Updating an installed reading to a template's new version.** It was
   filled in once; a new version is installed again, under its name.
 * **Blanks of other kinds** (a Setu account, a list). Numbers and words.
-* **A reading paused when its template's review is taken back.** A
-  reviewer can take back a review (Vidhi's notes/08); the marketplace
-  then stops listing the template, so `--from-market` refuses it, but a
-  reading already made from it keeps reading until its owner removes it.
+* ~~**A reading paused when its template's review is taken back.**~~
+  Paused by the clock within the hour (above, and the receipt below).
