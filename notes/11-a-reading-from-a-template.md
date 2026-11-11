@@ -119,3 +119,7 @@ $ prahari indriya get eth-price --max-age 5m
 * **Updating an installed reading to a template's new version.** It was
   filled in once; a new version is installed again, under its name.
 * **Blanks of other kinds** (a Setu account, a list). Numbers and words.
+* **A reading paused when its template's review is taken back.** A
+  reviewer can take back a review (Vidhi's notes/08); the marketplace
+  then stops listing the template, so `--from-market` refuses it, but a
+  reading already made from it keeps reading until its owner removes it.
