@@ -72,3 +72,15 @@ it's the value now.
 * ~~**Inputs from the watch beyond `found`.**~~ `--input room=porch` (or
   `routine_inputs`) is kept on the watch and given to each run over the
   routine's installed values; `found` stays the watch's own.
+* ~~**A routine picked on the page.**~~ **New watch** and **Mend** ask
+  *Then ask the agent, or just tell me* or *Then start one of my routines
+  (Vidhi)*. The second lists the computer's routines (`GET
+  /api/routines`, Vidhi's `list --json`) with what each does and its
+  blanks (all but `found`, which is the watch's own); a blank left empty
+  keeps what the routine holds, one filled becomes the watch's
+  `routine_inputs`. Picking *ask the agent* again takes the routine
+  away. Vidhi's card and `/routines on` in a chat make the same watch
+  from the routine's side (Vidhi's notes/09). On a scratch Prahari,
+  Mend set *Cold means below* to 32 on the cold-night watch (*Then it
+  starts the routine cold-night (line = 32)*), and New watch made *Hot
+  day: outside-temp above 90* starting the same routine.

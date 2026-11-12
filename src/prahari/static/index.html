@@ -142,6 +142,10 @@ form.new input, form.new textarea, form.new select { border: 1px solid var(--lin
 form.new textarea { min-height: 54px; resize: vertical; }
 form.new .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 form.new .hint { font-size: 12px; color: var(--ink-3); }
+.then-kind { display: flex; gap: 16px; flex-wrap: wrap; }
+form.new label.pick { display: flex; flex-direction: row; gap: 6px; align-items: center; }
+form.new label.pick input { width: auto; }
+form.new .hidden { display: none; }
 form.new .tried { white-space: pre-wrap; font-size: 14px; background: var(--teal-soft);
                   border-radius: 8px; padding: 10px; }
 form.new.mend { margin-top: 10px; background: var(--paper); }
@@ -188,8 +192,13 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
       <label>Most times a day <input name="max_per_day" type="number" min="1" max="200" value="10"></label>
     </div>
     <label>…and look at once when this knocks (a mailbox, Gmail's push) <input name="wake" placeholder="work-mail"></label>
-    <label>Then ask the agent (leave empty to just tell you)
+    <div class="then-kind"><label class="pick"><input type="radio" name="then_kind" value="agent" checked> Then ask the agent, or just tell me</label>
+      <label class="pick"><input type="radio" name="then_kind" value="routine"> Then start one of my routines (Vidhi)</label></div>
+    <label class="for-agent">Then ask the agent (leave empty to just tell you)
       <textarea name="then" placeholder="Tell me the new price and whether it's the lowest this month."></textarea></label>
+    <div class="for-routine hidden"><label>Which routine <select name="routine"></select></label>
+      <p class="hint routine-about"></p><div class="two routine-blanks"></div>
+      <p class="hint">When it fires, the routine starts with what it saw as its found blank, and tells you itself. A blank left empty keeps what the routine holds.</p></div>
     <div class="tried hidden" id="tried"></div>
     <div><button class="btn" type="button" id="try">Try it</button>
       <button class="btn main" type="submit">Save</button>
@@ -308,8 +317,12 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
             often belong to ${w.listen ? "the inlet" : "the indriya"}, not to this watch.</p>`}
       <div class="two">${box("Pick", "pick", pickWords(w.pick), 'class="mono"')}
         ${box("When", "when", whenWords(w.when), 'class="mono" required')}</div>
-      <label>Then ask the agent (leave empty to just tell you)
+      <div class="then-kind"><label class="pick"><input type="radio" name="then_kind" value="agent" ${w.routine ? "" : "checked"}> Then ask the agent, or just tell me</label>
+        <label class="pick"><input type="radio" name="then_kind" value="routine" ${w.routine ? "checked" : ""}> Then start one of my routines (Vidhi)</label></div>
+      <label class="for-agent">Then ask the agent (leave empty to just tell you)
         <textarea name="then">${esc(w.then || "")}</textarea></label>
+      <div class="for-routine hidden"><label>Which routine <select name="routine"></select></label>
+        <p class="hint routine-about"></p><div class="two routine-blanks"></div></div>
       ${box("Most times a day", "max_per_day", w.max_per_day, 'type="number" min="1" max="200"')}
       <p class="hint">A new pick or test starts it over: it forgets what it saw, and its next
         look decides afresh.</p>
@@ -342,8 +355,17 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
     e.preventDefault();
     const w = byId[f.dataset.mend], el = f.elements, body = {};
     try {
-      for (const key of ["name", "asked", "thing", "then"]) {
+      for (const key of ["name", "asked", "thing"]) {
         if (el[key].value.trim() !== (w[key] || "").trim()) body[key] = el[key].value.trim();
+      }
+      const next = thenOf(f);
+      if (next.routine) {
+        if (next.routine !== w.routine) body.routine = next.routine;
+        if (JSON.stringify(next.routine_inputs) !== JSON.stringify(w.routine_inputs || {}))
+          body.routine_inputs = next.routine_inputs;
+      } else if (w.routine || next.then !== (w.then || "").trim()) {
+        body.then = next.then;
+        if (w.routine) body.routine = "";
       }
       if (el.when.value.trim() !== whenWords(w.when)) body.when = whenOf(el.when.value);
       if (el.pick.value.trim() !== pickWords(w.pick)) body.pick = pickOf(el.pick.value);
@@ -360,6 +382,50 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
       await refresh();
     } catch (err) { fail(err); }
   });
+
+  // "Then start one of my routines": Vidhi's list, each with its blanks.
+  let routinesAsked = null;
+  const routinesList = () => (routinesAsked = routinesAsked
+    || api("GET", "routines").catch((e) => ({ routines: [], said: e.message })));
+  function wireThen(f, w) {
+    const pick = f.elements.routine, box = f.querySelector(".routine-blanks");
+    const show = () => {
+      const routine = f.elements.then_kind.value === "routine";
+      f.querySelectorAll(".for-agent").forEach((x) => x.classList.toggle("hidden", routine));
+      f.querySelector(".for-routine").classList.toggle("hidden", !routine);
+      if (routine) fill();
+    };
+    const blanks = async () => {
+      const { routines } = await routinesList();
+      const r = routines.find((x) => x.name === pick.value);
+      box.innerHTML = "";
+      f.querySelector(".routine-about").textContent = r ? r.about : "";
+      if (!r) return;
+      const own = (w && w.routine === r.name && w.routine_inputs) || {};
+      box.innerHTML = r.blanks.filter((b) => b.name !== "found").map((b) =>
+        `<label>${esc(b.label)} <input data-blank="${esc(b.name)}" value="${esc(own[b.name] ?? "")}"
+          placeholder="${esc(r.inputs[b.name] ?? "")}"></label>`).join("");
+    };
+    const fill = async () => {
+      if (pick.dataset.filled) return;
+      pick.dataset.filled = "1";
+      const { routines, said } = await routinesList();
+      pick.innerHTML = routines.map((r) => `<option value="${esc(r.name)}" ${w && w.routine === r.name ? "selected" : ""}>${esc(r.title)}${r.state !== "active" ? ` (${esc(r.state)})` : ""}</option>`).join("")
+        || `<option value="">${esc(said || "no routines")}</option>`;
+      blanks();
+    };
+    f.querySelectorAll('input[name="then_kind"]').forEach((x) => x.addEventListener("change", show));
+    pick.addEventListener("change", blanks);
+    show();
+  }
+  // what a form says it does next: ask the agent (then), or start a routine
+  function thenOf(f) {
+    if (f.elements.then_kind.value !== "routine") return { then: f.elements.then.value.trim(), routine: "" };
+    if (!f.elements.routine.value) throw new Error("pick a routine (install one on Vidhi's page)");
+    return { then: "", routine: f.elements.routine.value,
+             routine_inputs: Object.fromEntries([...f.querySelectorAll("[data-blank]")]
+               .filter((i) => i.value.trim()).map((i) => [i.dataset.blank, i.value.trim()])) };
+  }
 
   async function list() {
     const { watches } = await api("GET", "watches");
@@ -401,6 +467,8 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
           <button class="btn link danger" data-act="delete">Delete</button></div>
         ${mending === w.id ? mendForm(w) : ""}</div>`;
     }).join("");
+    const open = mending && box.querySelector(`form.mend[data-mend="${CSS.escape(mending)}"]`);
+    if (open) wireThen(open, byId[mending]);
   }
 
   async function looks() {
@@ -644,6 +712,7 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
 
   // -- the form ------------------------------------------------------------
   const form = $("new");
+  wireThen(form, null);
   $("new-open").onclick = () => { form.classList.remove("hidden"); form.name.focus(); };
   $("new-close").onclick = () => form.classList.add("hidden");
   const short = (text) => text.trim().startsWith("{") ? JSON.parse(text) : text.trim();
@@ -687,10 +756,11 @@ form.new.mend input, form.new.mend textarea { background: var(--sheet); }
     e.preventDefault();
     try {
       const body = { ...recipe(), name: form.elements.name.value,
-                     asked: form.elements.asked.value, then: form.elements.then.value,
+                     asked: form.elements.asked.value, ...thenOf(form),
                      max_per_day: Number(form.elements.max_per_day.value || 10) };
       await api("POST", "watches", body);
       form.reset(); form.classList.add("hidden"); $("tried").classList.add("hidden");
+      form.elements.then_kind[0].dispatchEvent(new Event("change"));
       await refresh();
     } catch (err) { fail(err); }
   };

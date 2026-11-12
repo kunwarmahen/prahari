@@ -9,6 +9,8 @@
     PATCH  /api/watches/ID   {check, pick, when, every, then, name, ...}
     POST   /api/watches/ID/pause | /resume | /look   (look answers 202 at once)
     DELETE /api/watches/ID
+    GET    /api/routines                   the computer's routines (Vidhi's list), for a
+                                           watch that starts one when it fires
     GET    /api/inlet                      the inlet's addresses and key, for a sender
     GET    /api/mailboxes                  the mail folders kept open (no passwords)
     GET    /api/indriyas                   every shared reading, with its value and age
@@ -80,6 +82,7 @@ import base64
 import binascii
 import hmac
 import json
+import subprocess
 import os
 import re
 import secrets
@@ -197,6 +200,8 @@ class Api:
     def _route(self, method, parts, query, body) -> tuple[int, dict]:
         if parts == ["status"] and method == "GET":
             return 200, report(self.state, self.store)
+        if parts == ["routines"] and method == "GET":
+            return 200, _routines()
         if parts == ["inlet"] and method == "GET":
             return 200, {"url": self.inlet_url, "public_url": self.inlet_public or None,
                          "key": self.inlet_key,
@@ -328,7 +333,9 @@ class Api:
             runner=runner, agent=str(body.get("agent") or ""), allow_tools=allow,
             max_per_day=_int(body.get("max_per_day") or watches.DEFAULT_MAX_PER_DAY,
                              "max_per_day"),
-            created_via="page", dvara=self.dvara if runner == "dvara" else None)
+            created_via="page", dvara=self.dvara if runner == "dvara" else None,
+            routine=str(body.get("routine") or ""),
+            routine_inputs=_filled(body.get("routine_inputs")))
 
     def push(self, name: str, raw: bytes, kind: str,
              owners: set[str] | None = None) -> tuple[int, dict]:
@@ -401,6 +408,39 @@ def _unwrapped(data: dict) -> dict:
     if message.get("messageId") and "id" not in event:
         event["id"] = str(message["messageId"])
     return event
+
+
+def _filled(given):
+    """A routine watch's own blanks: only the ones given a value."""
+    if not isinstance(given, dict):
+        return given or None
+    return {k: v for k, v in given.items() if str(v).strip() != ""} or None
+
+
+def _routines() -> dict:
+    """The computer's routines, as Vidhi lists them (``vidhi list --json``),
+    each with its blanks and what they hold; ``said`` when there are none."""
+    from prahari.looking import RunnerMissing, find_vidhi
+    try:
+        command = find_vidhi()
+    except RunnerMissing as exc:
+        return {"routines": [], "said": str(exc)}
+    try:
+        done = subprocess.run([*command, "list", "--json"], capture_output=True, text=True,
+                              timeout=30, stdin=subprocess.DEVNULL)
+        cards = json.loads(done.stdout or "[]")
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        return {"routines": [], "said": f"Vidhi didn't answer ({type(exc).__name__})"}
+    out = [{"name": c["name"], "title": c.get("title") or c["name"],
+            "about": c.get("about") or "", "state": c.get("state") or "",
+            "inputs": c.get("inputs") or {},
+            "blanks": [{"name": i.get("name"), "label": i.get("label") or i.get("name"),
+                        "kind": i.get("kind") or "text"}
+                       for i in c.get("inputs_spec") or [] if isinstance(i, dict)]}
+           for c in (cards if isinstance(cards, list) else [])
+           if isinstance(c, dict) and c.get("name")]
+    return {"routines": out, "said": "" if out else "No routines yet: install one on "
+                                                     "Vidhi's page."}
 
 
 def _int(value, name: str) -> int:

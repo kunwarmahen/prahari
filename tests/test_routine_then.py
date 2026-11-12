@@ -109,3 +109,37 @@ def test_inputs_need_a_routine_and_found_is_the_watchs_own(tmp_path):
         _watch(store, routine="cold-night", routine_inputs={"found": "x"})
     with pytest.raises(WatchError, match="one lowercase word"):
         _watch(store, routine="cold-night", routine_inputs={"The Room": "x"})
+
+
+# -- from the page ------------------------------------------------------------------------
+
+LISTING = '''
+import json, sys
+if sys.argv[1:2] == ["list"]:
+    print(json.dumps([{"name": "cold-night", "title": "Cold night warning",
+                       "state": "active", "inputs": {"line": 35},
+                       "inputs_spec": [{"name": "line", "label": "Cold means below",
+                                        "kind": "number"}]}]))
+'''
+
+
+def test_the_page_lists_the_routines_a_watch_can_start(tmp_path, monkeypatch):
+    from prahari.http import _routines
+    script = tmp_path / "vidhi.py"
+    script.write_text(LISTING)
+    monkeypatch.setenv("PRAHARI_VIDHI", f"{sys.executable} {script}")
+    got = _routines()
+    assert [r["name"] for r in got["routines"]] == ["cold-night"]
+    assert got["routines"][0]["blanks"][0]["label"] == "Cold means below"
+
+
+def test_a_watch_made_on_the_page_starts_its_routine_with_the_blanks_given(tmp_path):
+    from prahari.http import Api
+    store, clock = make_clock(tmp_path, FakeCaller("Last 47"))
+    made = Api(store, clock, tmp_path)._create({
+        "name": "Cold", "check": CHECK, "pick": {"number": ""}, "when": {"below": 35},
+        "every": "1h", "routine": "cold-night",
+        "routine_inputs": {"line": "33", "message": ""}})
+    assert made.routine == "cold-night" and made.then == ""
+    assert made.routine_inputs == {"line": "33"}
+    clock.close()

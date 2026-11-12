@@ -828,7 +828,12 @@ routine's `found` input when it has one: the value itself, or the new
 items for a `new` watch. The routine tells the person what it did, so
 the watch sends nothing of its own; one that didn't start is told, with
 why. A watch either asks the agent or starts a routine, never both
-([notes/10](notes/10-then-a-routine.md)).
+([notes/10](notes/10-then-a-routine.md)). On the page, **New watch** and
+**Mend** ask *Then ask the agent* or *Then start one of my routines*;
+the second lists the computer's routines from Vidhi with their blanks,
+and a blank you fill becomes the watch's own. Vidhi's card and
+`/routines on N READING below 35` in a chat make the same watch from the
+routine's side.
 
 With `PRAHARI_DVARA_URL` set, a fire is sent to the watch's person
 through Dvara (`POST /notify`): their Telegram, Dvara's web chat,
