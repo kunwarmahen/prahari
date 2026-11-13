@@ -891,6 +891,7 @@ offer watches to everyone.
 | `PRAHARI_SETU` | the command that starts Setu, for a mailbox's login (default: `setu` beside Prahari, else on PATH) |
 | `PRAHARI_INLET_PORT` | the inlet alone on this port, for the public road (also `--inlet-port`) |
 | `PRAHARI_INLET_PUBLIC_URL` | where the internet reaches that inlet: its Tailscale Funnel name (also `--inlet-public-url`) |
+| `PRAHARI_SEE_MODEL` | the model a `see` pick's picture is put to (one that can see, like `gemma4:12b`; default: Yantra's own); Sarathi's `[prahari] see_model` ([notes/14](notes/14-a-picture-seen.md)) |
 
 Everything is in one SQLite file, `~/.prahari/prahari.sqlite3`; no
 password is ever kept here (a mailbox's is in Setu). Each
