@@ -283,6 +283,9 @@ def build_parser() -> argparse.ArgumentParser:
                "this computer's person)")
     i = isub.add_parser("list", help="every indriya and what it read last")
     i.add_argument("--as", dest="as_actor", default="", metavar="ACTOR", help=as_help)
+    i.add_argument("--all", action="store_true", dest="every_person",
+                   help="every person's, shared or not: for the house's own list of "
+                        "who may do what (dvara grants), never a person's")
     i.add_argument("--json", action="store_true", dest="json_out")
     for name, text in (("get", "its value now, with how old it is"),
                        ("readings", "what it read, newest first")):
@@ -934,7 +937,8 @@ def _indriya(args, store: Store, state: Path) -> int:
     # changing one is only ever this computer's person's own.
     reader = getattr(args, "as_actor", "") or watches.LOCAL_OWNER
     if sub == "list":
-        found = indriyas.visible(store, reader, home)
+        found = indriyas.visible(store, None if getattr(args, "every_person", False)
+                                 else reader, home)
         if args.json_out:
             print(json.dumps([indriyas.card(i, store) for i in found]))
             return 0

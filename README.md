@@ -282,6 +282,8 @@ prahari indriya look outside-temp      # read once, now; each watch decides on i
 
 prahari indriya list                   # every reading, its value and age, who senses it
 prahari indriya list --as asha --json  # as asha sees them: her own, then the house's
+prahari indriya list --all --json      # every person's, shared or not: for Dvara's list of
+                                       # who may do what (dvara grants), never a person's view
 prahari indriya get outside-temp --json
 prahari indriya readings outside-temp  # what happened: each reading, how it came, and what
                                        # every watch decided on it (--full: why, what came in)

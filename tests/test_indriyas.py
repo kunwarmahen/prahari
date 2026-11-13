@@ -382,6 +382,8 @@ class TestTheOtherDoors:
 
         assert names("list", "--as", "asha") == ["asha-steps", "outside-temp"]
         assert names("list") == ["outside-temp", "bank-mail"]
+        # the house's own list of grants (dvara grants) sees everyone's
+        assert sorted(names("list", "--all")) == ["asha-steps", "bank-mail", "outside-temp"]
         assert names("get", "outside-temp", "--as", "asha") == "outside-temp"
         assert cli.main(["--state", str(tmp_path), "indriya", "get", "bank-mail",
                          "--as", "asha"]) == 2
