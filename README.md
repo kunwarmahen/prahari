@@ -866,7 +866,9 @@ through Dvara as a person (`--runner dvara --as NAME`: their allowance,
 their rules, `came_by: prahari` on Dvara's page, and the watch's name
 as `label`, so a step on a phone says *Prahari: Mayfield ice cream ·
 asha* on Sparsh's page; here, Yantra is given it as `YANTRA_ASKED_BY`
-for the look and the turn alike). On the Dvara road the
+for the look and the turn alike, and with `YANTRA_USAGE_BY=prahari` it
+names a question's or a picture's line in the house's usage file,
+Yantra's notes/160). On the Dvara road the
 look goes there too: `POST /call` builds the person's agent with their
 own Setu folder and runs the one call with no model (Dvara's notes/56).
 So a guest's watch reads the guest's mail, never yours, and Dvara can
