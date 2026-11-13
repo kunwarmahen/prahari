@@ -927,8 +927,9 @@ def preview(caller, *, check=None, listen: str = "", pick=None, when=None,
             probe = indriya_probe(sensed)
             probe.id = ""
         else:
+            # the pick rides along: a ``see`` pick's look asks for its picture
             probe = Watch(id="", owner=owner, name="", check=parts["check"], agent=agent,
-                          runner=runner)
+                          runner=runner, pick=parts["pick"])
         called = caller.call(probe, granted=False)
         if not called.ok:
             tool = (sensed.check if sensed is not None else parts["check"])["tool"]

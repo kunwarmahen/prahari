@@ -26,7 +26,19 @@ silently.
            {"json": PATH}          a value from JSON: a.b[0].c, list[*].id
            {"items": REGEX}        every match is an item; group 1 is its key
            {"items_json": PATH, "key": FIELD}   items from a JSON list
+           {"see": QUESTION}       a picture the check answered with (a
+                                    camera's snapshot), put to a model that
+                                    can see with QUESTION; its one-line
+                                    answer is the value
            {}                      the whole text
+
+A PICTURE IS THE ONE PICK A MODEL MAKES. Every other pick is a pattern
+run here. A camera's frame has no text to run one on, so ``see`` asks a
+model that can see -- the look's own model call, said on the watch's card
+("what a model sees, asked: is there a package at the door?") -- and the
+rest is the same: a test on its answer (``{"contains": "yes"}``), fired
+on its edge. The question is asked by the look (looking.Roads), never
+here: this module still runs no model.
 
     when   {"below": N} {"above": N} {"at_most": N} {"at_least": N}
            {"equals": X} {"contains": S} {"lacks": S} {"matches": REGEX}
@@ -49,7 +61,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-PICKS = ("number", "text", "json", "items", "items_json")
+PICKS = ("number", "text", "json", "items", "items_json", "see")
 #: Keys a pick may have besides its kind.
 PICK_EXTRA = {"items_json": ("key",)}
 
@@ -69,6 +81,8 @@ MAX_EVERY = timedelta(days=7)
 TEXT_CAP = 2000
 #: How many items one look may report as new.
 ITEMS_CAP = 50
+#: The longest answer a ``see`` pick keeps: one short line.
+SEEN_CAP = 200
 
 _NUMBER = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?|[-+]?\.\d+")
 _DURATION = re.compile(r"^\s*(\d+)\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)\s*$",
@@ -137,6 +151,9 @@ def check_pick(pick: dict | str | None) -> dict:
         _regex(value, f"pick {kind}")
     if kind in ("json", "items_json"):
         _path(value)
+    if kind == "see" and not value.strip():
+        raise RecipeError("pick see is the question to ask about the picture, like "
+                          "\"Is there a package at the door? Answer yes or no.\"")
     if kind == "items_json" and not isinstance(pick.get("key", ""), str):
         raise RecipeError("pick key is a field name in each item")
     return dict(pick)
@@ -269,6 +286,10 @@ def apply(pick: dict, text: str) -> Picked:
     pattern = pick[kind]
     if kind == "number":
         return _pick_number(pattern, text)
+    if kind == "see":
+        # the model's answer, already asked by the look: its first line
+        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        return Picked(found=bool(first), value=first[:SEEN_CAP])
     if kind == "text":
         if not pattern:
             stripped = text.strip()
@@ -371,6 +392,8 @@ def thing_words(pick: dict, thing: str = "") -> str:
     its kind ("the number", "the list")."""
     if thing:
         return thing
+    if pick_kind(pick) == "see":
+        return f"what a model sees, asked: {pick['see'].strip()}"
     return {"number": "the number", "text": "the text", "json": "the value",
             "items": "the list", "items_json": "the list", "": "the result"}[pick_kind(pick)]
 

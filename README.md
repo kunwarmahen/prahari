@@ -452,7 +452,24 @@ that reads.
 | `json:data.amount` | `{"json": "data.amount"}` | a value from JSON (`a.b[0].c`, `list[*].id`) |
 | `items:thread (\w+)` | `{"items": "thread (\\w+)"}` | every match is an item; group 1 is its key |
 | `items_json:messages[*]:id` | `{"items_json": "messages[*]", "key": "id"}` | items from a JSON list |
+| | `{"see": "Is there a package by the door? Answer yes or no."}` | a **picture** the check answered with (a camera's `camera_snapshot`), put to a model that can see; its one-line answer is the value ([notes/14](notes/14-a-picture-seen.md)) |
 | (nothing) | `{}` | the whole answer |
+
+**A camera.** `see` is the one pick a model makes, and the card says so
+(*what a model sees, asked: …*). The look asks for the picture back,
+saves it in the watch's folder and asks `yantra --image` the question,
+every tool off; `PRAHARI_SEE_MODEL` names the model (`gemma4:12b` found
+a dog `qwen3.8` missed on a 640-wide frame: try a question with `preview`
+first). Some cameras send Home Assistant their last saved frame, not a
+new one, and no model is asked to read a camera's stamp: every one tried
+made the time up ([notes/14](notes/14-a-picture-seen.md)):
+
+```
+prahari indriya add porch-package --check mcp__homeassistant-home__camera_snapshot \
+  --args '{"entity_id": "camera.porch"}' \
+  --pick '{"see": "Is there a package or a box by the door? Answer yes or no."}' --every 15m
+prahari add "Package at the door" --sense porch-package --when '{"contains": "yes"}'
+```
 
 **when** — when it matters:
 
@@ -897,7 +914,7 @@ it starts nothing. Sarathi users don't need this: `sarathi up` runs it.
 
 ```
 src/prahari/
-├── recipe.py    the recipe's form: pick (number, text, json, items) and when
+├── recipe.py    the recipe's form: pick (number, text, json, items, see) and when
 │                (below, contains, changed, new, any, ask), checked with
 │                the known keys named, and applied to a tool's answer
 ├── store.py     the SQLite file: watches (the promise), looks (the receipt),
@@ -935,7 +952,9 @@ src/prahari/
 │                ([notes/11](notes/11-a-reading-from-a-template.md))
 ├── looking.py   Yantra as a program: the look (yantra --call, granted word
 │                for word), the yes/no for ask, the then-turn (Samay's
-│                direct road); Roads, each watch's look on its own road;
+│                direct road); Roads, each watch's look on its own road,
+│                and a see pick's picture put to a model that can see
+│                (Asker.see, [notes/14](notes/14-a-picture-seen.md));
 │                start_routine: `vidhi start` as the watch's person
 ├── dvara.py     the Dvara road: /call for a look as the person, /notify for
 │                news, /message for a turn as the person (came_by prahari,
@@ -965,7 +984,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 331 tests. The API is not stable.
+tools work, and are covered by 343 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,

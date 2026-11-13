@@ -723,7 +723,8 @@ def _dvara() -> Dvara | None:
 def _caller(state: Path) -> Roads:
     """Each watch's look on its own road: here, or through Dvara as its person."""
     dvara = _dvara()
-    return Roads(Caller(state / "work"), DvaraCaller(dvara) if dvara is not None else None)
+    return Roads(Caller(state / "work"), DvaraCaller(dvara) if dvara is not None else None,
+                 seer=Asker(state / "work"))
 
 
 def _home() -> set[str]:

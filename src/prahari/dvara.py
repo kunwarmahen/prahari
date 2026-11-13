@@ -31,7 +31,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from prahari.looking import CALL_FORMAT, LOOK_LIMIT, Called, TurnResult, grant_for
+from prahari.looking import (CALL_FORMAT, LOOK_LIMIT, Called, TurnResult, _pictures,
+                             grant_for, wants_picture)
 from prahari.store import Watch
 
 #: How long a call that is not a turn may take.
@@ -116,6 +117,8 @@ class DvaraCaller:
         body = {"actor": actor, "agent": watch.agent, "tool": tool, "args": args,
                 "allow_tools": [grant] if grant else [], "came_by": "prahari",
                 "label": watch.name or watch.id}
+        if wants_picture(watch):
+            body["pictures"] = True
         try:
             data = self.dvara.call("POST", "/call", body, timeout=self.limit)
         except TimeoutError:
@@ -130,7 +133,8 @@ class DvaraCaller:
         return Called(ok=bool(data.get("ok")), text=str(data.get("text") or ""),
                       detail=str(data.get("detail") or ""),
                       needs=[str(n) for n in data.get("needs_person") or []],
-                      busy=[str(b) for b in data.get("busy") or []])
+                      busy=[str(b) for b in data.get("busy") or []],
+                      pictures=_pictures(data))
 
 
 class DvaraRunner:

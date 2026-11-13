@@ -82,6 +82,10 @@ _PICK = {"type": "object", "description": (
     'number, or {"number": "\\\\$([\\\\d.,]+)"} the one a pattern finds (group 1); '
     '{"text": "REGEX"}; {"json": "a.b[0].c"}; {"items": "thread (\\\\w+)"} every '
     'match an item, group 1 its key; {"items_json": "messages[*]", "key": "id"}; '
+    '{"see": "Is there a package at the front door? Answer yes or no."} for a check '
+    "that answers with a PICTURE (a camera's camera_snapshot): a model that can see is "
+    'asked the question and its one-line answer is the value (then a when like '
+    '{"contains": "yes"}); '
     "{} the whole answer. Call preview_watch to see the answer you are picking from.")}
 _WHEN = {"type": "object", "description": (
     'When it matters, ONE of: {"below": 50} {"above": 50} {"at_most": N} '
