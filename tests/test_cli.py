@@ -170,3 +170,25 @@ def test_a_file_made_before_wake_opens_and_gains_it(tmp_path):
     made = watches.create(store, name="x", check={"tool": "t", "args": {}},
                           when={"changed": True}, every="1h")
     assert store.get(made.id).wake == "" and store.get(made.id).renew == {}
+
+
+def test_status_names_what_paused_itself_and_never_a_persons_own_pause(tmp_path, capsys):
+    """Sarathi's doctor reads this: a watch Prahari stopped after failing
+    again and again has gone quiet, and nobody knows."""
+    from prahari import indriyas, watches
+    from prahari.status import stopped_itself
+    from prahari.store import Store
+    store = Store(tmp_path / "prahari.sqlite3")
+    check = {"tool": "web_fetch", "args": {"url": "https://x.example"}}
+    mine = watches.create(store, name="Mine", check=check, pick={"number": ""},
+                          when={"below": 5}, every="1h")
+    broke = watches.create(store, name="Ice cream", check={**check, "args": {
+        "url": "https://y.example"}}, pick={"number": ""}, when={"below": 6}, every="1h")
+    watches.pause(store, mine.id)
+    store.update(broke.id, state="paused", paused_because="failed 5 times in a row; last: 403")
+    reading = indriyas.create(store, name="outside-temp", check=check, pick={"number": ""})
+    store.update_indriya(reading.id, state="paused", paused_because="nothing used it for 30 days")
+    said = stopped_itself(store)
+    assert [(s["kind"], s["name"]) for s in said] == [("watch", "Ice cream"),
+                                                      ("reading", "outside-temp")]
+    assert said[0]["why"].startswith("failed 5 times")

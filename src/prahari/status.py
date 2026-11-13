@@ -70,6 +70,28 @@ def serving(state: Path) -> dict | None:
     return info if isinstance(info, dict) else {}
 
 
+#: What a person's own pause says (watches.pause, indriyas.pause).
+BY_A_PERSON = "paused by you"
+#: At most this many paused-by-itself items are listed.
+STOPPED_SHOWN = 10
+
+
+def stopped_itself(store: Store) -> list[dict]:
+    """Watches and readings Prahari paused on its own, with why -- the
+    ones nobody knows have gone quiet. A person's own pause is not here."""
+    out: list[dict] = []
+    for watch in store.watches():
+        if watch.state == "paused" and watch.paused_because \
+                and watch.paused_because != BY_A_PERSON:
+            out.append({"kind": "watch", "id": watch.id, "name": watch.name,
+                        "owner": watch.owner, "why": watch.paused_because[:200]})
+    for indriya in store.indriyas(state="paused"):
+        if indriya.paused_because and indriya.paused_because != BY_A_PERSON:
+            out.append({"kind": "reading", "id": indriya.id, "name": indriya.name,
+                        "owner": indriya.owner, "why": indriya.paused_because[:200]})
+    return out[:STOPPED_SHOWN]
+
+
 def report(state: Path, store: Store) -> dict:
     counts = {"active": 0, "paused": 0, "listening": 0}
     for watch in store.watches():
@@ -97,5 +119,8 @@ def report(state: Path, store: Store) -> dict:
         "mailboxes": len(store.mailboxes()),
         "indriyas": {"active": len(store.indriyas(state="active")),
                      "paused": len(store.indriyas(state="paused"))},
+        # paused by Prahari, not by a person: a look that failed again and
+        # again, a reading nobody uses, a sign-in wall (Sarathi's doctor)
+        "stopped_itself": stopped_itself(store),
         "mcp": {"command": prahari_command(), "args": ["--state", str(state), "mcp"]},
     }

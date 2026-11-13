@@ -975,7 +975,9 @@ deploy/
 ├── version.py   prahari --version and status's "version": the day of the last
 │                commit and that day's count (2026.10.25.3), with the commit;
 │                from git, else the VERSION file `sarathi image` writes
-├── status.py    prahari status --json: here, watching (a lock, not a pid)
+├── status.py    prahari status --json: here, watching (a lock, not a pid);
+│                stopped_itself, the watches and readings Prahari paused on
+│                its own with why, for Sarathi's doctor
 ├── unit.py      prahari unit: a systemd user unit
 └── cli.py       the commands above
 ```
@@ -984,7 +986,7 @@ deploy/
 
 The watch, its rules, indriyas, the inlet, mailboxes kept open, Gmail's
 push, the inlet alone for the public road, the page and the agent's
-tools work, and are covered by 343 tests. The API is not stable.
+tools work, and are covered by 344 tests. The API is not stable.
 
 Run for real: a watch on a real mail account, made from the chat,
 fired and woke the agent; an `ask` watch's question, as it sends it,
